@@ -54,3 +54,23 @@
 - 云端工作流在 `lishan1990/rustdesk-api-server-pro` 的 `rd-client` 分支
   `.github/workflows/client-build.yml`：新增 `build-rustdesk-ios` job（macos-14 + aarch64-apple-ios + flutter ipa），
   未配置苹果签名材料时产出未签名 .ipa（需自行重签后安装）。
+
+
+## 2026-11-13 Android 客户端修复（代码在 rustdesk-api-server-pro@rd-client）
+
+面板触发的定制客户端构建，Android 侧两处修复位于 `lishan1990/rustdesk-api-server-pro` 的 `rd-client` 分支（commit `89415dd6e843`、`8d75fcd20f2f`）：
+
+- `flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/DocumentLogs.kt`
+  Android 11+ 分区存储下，SAF 授权 `Android/media` 后应用只能访问 `Android/media/<包名>`。
+  原代码用应用标签作目录名，定制客户端该标签是 ASCII 安装名（如 `RDD3FDE6`），
+  导致 `Android/media/RDD3FDE6 is not available as a directory` 弹窗并阻断服务启动。
+  现改为 `context.packageName`；个别 ROM 仍拒绝时静默降级为应用私有日志目录，不再弹窗阻断。
+- `.github/workflows/client-build.yml`
+  删除把 `signingConfigs.release` 替换成公开 debug key 的 `sed`，改为用自有 release keystore 签名，
+  避免国产 ROM 以「高风险应用」拦截安装；构建前用 `keytool -list` 校验 keystore 可读性。
+
+签名材料以 4 个 Actions Secrets 提供（签名固定，后续构建可覆盖安装）：
+`ANDROID_SIGNING_KEY`（PKCS12 base64）、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_STORE_PASSWORD`。
+未配置时 workflow 会生成自签 keystore 并通过 Actions cache 复用。
+
+注意：此前自行签名安装的 APK 与新签名不同，需先卸载旧包再安装新包。
