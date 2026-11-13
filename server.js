@@ -1025,7 +1025,7 @@ function recordBuildHistory(job) {
     lang: opts.lang === 'en' ? 'en' : 'zh',
     conn: opts.conn === 'dual' ? 'dual' : 'agent',
     style: opts.style === 'standard' ? 'standard' : (opts.style === 'unattended' ? 'unattended' : 'portable'),
-    os: opts.both ? 'both' : (opts.os === 'android' ? 'android' : 'windows'),
+    os: opts.all ? 'all' : (opts.both ? 'both' : (opts.os === 'ios' ? 'ios' : (opts.os === 'android' ? 'android' : 'windows'))),
     createdAt: job.createdAt,
     successAt: Date.now(),
     fileName: job.fileName,
@@ -1070,7 +1070,7 @@ function restoreBuilds() {
           lang: null,
           conn: null,
           style: null,
-          os: /android/i.test(f) ? 'android' : (/双系统/.test(f) ? 'both' : 'windows'),
+          os: /三系统/.test(f) ? 'all' : (/双系统/.test(f) ? 'both' : (/ios|ipa/i.test(f) ? 'ios' : (/android|apk/i.test(f) ? 'android' : 'windows'))),
           createdAt: fst.mtimeMs,
           successAt: fst.mtimeMs,
           fileName: f,
@@ -1247,6 +1247,7 @@ const JOB_SLICES = {
   'x86_64-pc-windows-msvc': [18, 62, '编译 Windows 客户端'],
   'build rustdesk android apk': [18, 40, '编译 Android 核心库'],
   'build rustdesk android universal apk': [40, 86, '打包 Android 安装包'],
+  'build rustdesk ios ipa': [18, 86, '编译 iOS 客户端'],
 };
 
 function sliceFor(name) {
@@ -1361,6 +1362,7 @@ async function fetchArtifacts(cfg, runId, targets, workDir, brand) {
   const wanted = [];
   if (targets.includes('windows')) wanted.push('rd-client-windows-x64');
   if (targets.includes('android')) wanted.push('rd-client-android-universal');
+  if (targets.includes('ios')) wanted.push('rd-client-ios-arm64');
   const results = [];
   for (const name of wanted) {
     const art = arts.find(a => a.name === name && !a.expired);
@@ -1393,7 +1395,9 @@ function pickInstaller(dir, ext) {
 async function runCloudBuild(job) {
   const opts = job.opts;
   const brand = cleanBrand(opts.brand) || 'RustDesk';
-  const targets = opts.both ? ['windows', 'android'] : [opts.os === 'android' ? 'android' : 'windows'];
+  const targets = opts.all ? ['windows', 'android', 'ios']
+    : (opts.both ? ['windows', 'android']
+      : [opts.os === 'ios' ? 'ios' : (opts.os === 'android' ? 'android' : 'windows')]);
   const workDir = path.join(BUILD_DIR, job.id);
   fs.mkdirSync(workDir, { recursive: true });
   try {
@@ -1413,7 +1417,7 @@ async function runCloudBuild(job) {
     const dispatchAt = Date.now();
     await ghJson('POST', `/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${cfg.workflow}/dispatches`, {
       ref: cfg.branch,
-      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', target: targets.length > 1 ? 'both' : targets[0] },
+      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
     });
     const runId = await waitForRun(cfg, dispatchAt, job);
     await pollRun(cfg, runId, job);
@@ -1427,6 +1431,7 @@ async function runCloudBuild(job) {
       const msi = pickInstaller(dir, '.msi');
       const exe = pickInstaller(dir, '.exe');
       const apk = pickInstaller(dir, '.apk');
+      const ipa = pickInstaller(dir, '.ipa');
       if (msi) {
         const name = `${brand}-${CLIENT_VERSION}-x64-安装包.msi`;
         fs.copyFileSync(msi, path.join(workDir, name));
@@ -1441,6 +1446,11 @@ async function runCloudBuild(job) {
         fs.copyFileSync(apk, path.join(workDir, name));
         finals.push(name);
       }
+      if (ipa) {
+        const name = `${brand}-${CLIENT_VERSION}-iOS.ipa`;
+        fs.copyFileSync(ipa, path.join(workDir, name));
+        finals.push(name);
+      }
     }
     if (!finals.length) throw new Error('构建产物中没有可用的安装包');
 
@@ -1449,7 +1459,7 @@ async function runCloudBuild(job) {
       fileName = finals[0];
       filePath = path.join(workDir, fileName);
     } else {
-      fileName = `${brand}-${CLIENT_VERSION}-双系统客户端.zip`;
+      fileName = `${brand}-${CLIENT_VERSION}-${finals.length >= 3 ? '三系统' : '双系统'}客户端.zip`;
       filePath = path.join(workDir, fileName);
       await runCmd('zip', ['-r', '-q', '-y', fileName, ...finals], { cwd: workDir, timeout: 600000 });
     }
@@ -1458,6 +1468,7 @@ async function runCloudBuild(job) {
 
     try { fs.rmSync(path.join(workDir, 'rd-client-windows-x64'), { recursive: true, force: true }); } catch (e) {}
     try { fs.rmSync(path.join(workDir, 'rd-client-android-universal'), { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(path.join(workDir, 'rd-client-ios-arm64'), { recursive: true, force: true }); } catch (e) {}
     finals.forEach(f => { if (f !== fileName) { try { fs.unlinkSync(path.join(workDir, f)); } catch (e) {} } });
     job.fileName = fileName;
     job.file = filePath;
@@ -1574,8 +1585,9 @@ app.post('/api/build/start', async (req, res) => {
     createdAt: Date.now(),
     opts: {
       brand,
-      os: body.os === 'android' ? 'android' : 'windows',
-      both: !!body.both,
+      os: body.os === 'ios' ? 'ios' : (body.os === 'android' ? 'android' : 'windows'),
+      all: body.all === true || body.all === 'true' || body.all === 'Y',
+      both: !!body.both, // 兼容旧版「双系统构建」请求
       lang: body.lang === 'en' ? 'en' : 'zh',
       conn: body.conn === 'dual' ? 'dual' : 'agent',
       style: body.style === 'standard' ? 'standard' : (body.style === 'unattended' ? 'unattended' : 'portable'),

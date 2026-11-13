@@ -1188,8 +1188,8 @@ function applyCustomizeForm() {
     const r = document.querySelector(`input[name="style"][value="${data.style}"]`);
     if (r) r.checked = true;
   }
-  const both = document.getElementById('buildBoth');
-  if (both && data.both != null) both.checked = !!data.both;
+  const all = document.getElementById('buildAll');
+  if (all && (data.all != null || data.both != null)) all.checked = !!(data.all != null ? data.all : data.both);
   ['allowTempPwdChk', 'hideCmChk'].forEach(id => {
     const el = document.getElementById(id);
     if (el && data[id] != null) el.checked = !!data[id];
@@ -1200,13 +1200,13 @@ document.addEventListener('input', (e) => {
   const t = e.target;
   if (!t) return;
   if (t.id && CUSTOMIZE_TEXT_FIELDS.indexOf(t.id) >= 0) { writeCustomizeStore({ [t.id]: t.value }); return; }
-  if (t.id === 'buildBoth') writeCustomizeStore({ both: !!t.checked });
+  if (t.id === 'buildAll') writeCustomizeStore({ all: !!t.checked });
 });
 document.addEventListener('change', (e) => {
   const t = e.target;
   if (!t) return;
   if (t.name === 'os' || t.name === 'lang' || t.name === 'conn' || t.name === 'style') writeCustomizeStore({ [t.name]: t.value });
-  if (t.id === 'buildBoth') writeCustomizeStore({ both: !!t.checked });
+  if (t.id === 'buildAll') writeCustomizeStore({ all: !!t.checked });
   if (t.id === 'allowTempPwdChk' || t.id === 'hideCmChk') {
     writeCustomizeStore({ [t.id]: !!t.checked });
   }
@@ -1238,11 +1238,11 @@ function collectCustomize() {
   const langEl = document.querySelector('input[name="lang"]:checked');
   const connEl = document.querySelector('input[name="conn"]:checked');
   const styleEl = document.querySelector('input[name="style"]:checked');
-  const bothEl = document.getElementById('buildBoth');
+  const allEl = document.getElementById('buildAll');
   return {
     brand: get('brandInput'),
     os: osEl ? osEl.value : 'windows',
-    both: !!(bothEl && bothEl.checked),
+    all: !!(allEl && allEl.checked),
     lang: langEl ? langEl.value : 'zh',
     conn: connEl ? connEl.value : 'agent',
     style: styleEl ? styleEl.value : 'portable',
@@ -1372,7 +1372,7 @@ async function restoreBuildState() {
 const LANG_LABEL  = { zh: '中文', en: '英文' };
 const CONN_LABEL  = { agent: '被控专用', dual: '双向' };
 const STYLE_LABEL = { portable: '便携版', unattended: '无人值守版', standard: '官方标准版' };
-const OS_LABEL    = { windows: 'Windows', android: 'Android', both: 'Windows + Android' };
+const OS_LABEL    = { windows: 'Windows', android: 'Android', ios: 'iOS', both: 'Windows + Android', all: 'Windows + Android + iOS' };
 
 function fmtDT(ms) {
   if (!ms) return '—';
@@ -1433,7 +1433,7 @@ function renderClientGen() {
     // ======== Banner ========
     h('div', { class: 'customize-banner' }, [
       h('h1', {}, '远程协助客户端定制'),
-      h('p', {}, '在线定制属于你自己的远程控制客户端：把品牌名、服务器地址、安全与网络策略填进表单，系统会在云端编译出独立的 Windows 安装包或 Android 安装包，配置直接内嵌进程序，无需任何源码知识。'),
+      h('p', {}, '在线定制属于你自己的远程控制客户端：把品牌名、服务器地址、安全与网络策略填进表单，系统会在云端编译出独立的 Windows、Android 或 iOS 安装包，配置直接内嵌进程序，无需任何源码知识。'),
       h('div', { class: 'customize-banner-tags' }, [
         h('span', { class: 'tag' }, '自定义品牌名'),
         h('span', { class: 'tag' }, '指定自己的服务器'),
@@ -1672,22 +1672,26 @@ function renderClientGen() {
                     h('input', { type: 'radio', name: 'os', value: 'android' }),
                     'Android 系统（.apk 安装包）',
                   ]),
+                  h('label', { class: 'customize-radio' }, [
+                    h('input', { type: 'radio', name: 'os', value: 'ios' }),
+                    'iOS 系统（.ipa 安装包）',
+                  ]),
                 ]),
-                h('div', { class: 'customize-field-desc' }, '选择本次要构建的客户端平台，默认 Windows'),
+                h('div', { class: 'customize-field-desc' }, '选择本次要构建的客户端平台，默认 Windows；iOS 在 macOS 云端编译，未配置苹果签名时产出未签名 .ipa（可用 AltStore / Sideloadly / 企业证书重签后安装）'),
               ]),
             ]),
           ]),
 
-          // 双系统构建
+          // 三系统构建
           h('div', { class: 'customize-field' }, [
             h('div', { class: 'customize-field-row' }, [
-              h('div', { class: 'customize-field-label' }, '双系统构建'),
+              h('div', { class: 'customize-field-label' }, '三系统构建'),
               h('div', { class: 'customize-field-control' }, [
                 h('label', { class: 'customize-checkbox' }, [
-                  h('input', { type: 'checkbox', id: 'buildBoth' }),
-                  '同时构建双系统安装包（Windows + Android）',
+                  h('input', { type: 'checkbox', id: 'buildAll' }),
+                  '同时构建三系统安装包（Windows + Android + iOS）',
                 ]),
-                h('div', { class: 'customize-field-desc' }, '勾选后一次生成两个平台的安装包，构建时间约为单系统的两倍'),
+                h('div', { class: 'customize-field-desc' }, '勾选后一次生成三个平台的安装包，构建时间约为单系统的三倍'),
               ]),
             ]),
           ]),

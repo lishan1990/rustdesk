@@ -43,3 +43,14 @@
 ### 功能
 设备管理（OSS peer 表、旧 Pro 库回填主机名/系统、改备注）、服务状态（Docker 容器 + systemd 混合检测）、
 审计日志/用户列表时区统一、定制客户端云编译（触发 GitHub Actions、下载 MSI 成品、构建历史）、连接参数展示。
+
+
+## 2026-11-13 更新：定制客户端支持 iOS / 三系统构建
+
+- 「外观 / 其他」→「客户端系统」新增 **iOS 系统（.ipa 安装包）** 单选项。
+- 原「双系统构建」改为 **「三系统构建」**：勾选后一次构建 Windows + Android + iOS。
+- 后端 `server.js`：`targets` 支持 `ios` / `all`，`workflow_dispatch` 的 `target` 相应传 `ios` 或 `all`，
+  下载 `rd-client-ios-arm64` 产物、整理 `.ipa`、打包「三系统客户端.zip」、构建历史新增 `ios` / `all` 标签。
+- 云端工作流在 `lishan1990/rustdesk-api-server-pro` 的 `rd-client` 分支
+  `.github/workflows/client-build.yml`：新增 `build-rustdesk-ios` job（macos-14 + aarch64-apple-ios + flutter ipa），
+  未配置苹果签名材料时产出未签名 .ipa（需自行重签后安装）。
