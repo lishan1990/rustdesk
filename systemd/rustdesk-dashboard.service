@@ -1,0 +1,20 @@
+[Unit]
+Description=RustDesk Self-Hosted Admin Dashboard
+After=network.target rustdesk-hbbs.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/rustdesk-dashboard
+Environment=NODE_ENV=production
+Environment=DB_PATH=/opt/rustdesk-server/bin/db.sqlite3
+Environment=KEY_PATH=/opt/rustdesk-server/bin/id_ed25519.pub
+Environment=PORT=21120
+ExecStart=/usr/local/bin/node server.js
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

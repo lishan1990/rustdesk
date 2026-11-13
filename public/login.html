@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 - RustDesk Console</title>
+<style>
+  :root{
+    --accent:#165dff; --accent-hover:#0e48d2; --text:#1d2129; --dim:#4e5969;
+    --mute:#86909c; --border:#e4e7ed; --err:#f53f3f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:#f5f7fa;color:var(--text);
+    display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;
+    background-image:radial-gradient(circle at 15% 20%, #e8f0ff 0%, transparent 45%),
+                      radial-gradient(circle at 85% 80%, #eef2ff 0%, transparent 45%);
+  }
+  .login-card{
+    width:100%;max-width:380px;background:#fff;border:1px solid var(--border);border-radius:14px;
+    padding:34px 32px 28px;box-shadow:0 12px 40px rgba(15,30,80,0.08);
+  }
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:26px;}
+  .brand img{width:36px;height:36px;object-fit:contain;border-radius:9px;background:#fff;}
+  .brand-name{font-size:15px;font-weight:700;letter-spacing:.3px;}
+  .brand-sub{font-size:11px;color:var(--mute);margin-top:1px;}
+  h1{font-size:19px;font-weight:600;margin-bottom:4px;}
+  .tip{font-size:12px;color:var(--mute);margin-bottom:22px;}
+  .field{margin-bottom:15px;}
+  .field label{display:block;font-size:12px;font-weight:500;color:var(--dim);margin-bottom:6px;}
+  .field input{
+    width:100%;padding:10px 12px;font-size:13px;font-family:inherit;color:var(--text);
+    border:1px solid var(--border);border-radius:8px;background:#fff;transition:border .15s,box-shadow .15s;
+  }
+  .field input:focus{outline:none;border-color:rgba(22,93,255,.5);box-shadow:0 0 0 3px rgba(22,93,255,.1);}
+  .err{
+    display:none;margin-bottom:14px;padding:8px 11px;border-radius:7px;font-size:12px;
+    background:rgba(245,63,63,.07);color:var(--err);border:1px solid rgba(245,63,63,.2);
+  }
+  .err.show{display:block;}
+  button{
+    width:100%;padding:10px 0;font-size:14px;font-weight:500;font-family:inherit;color:#fff;
+    background:var(--accent);border:none;border-radius:8px;cursor:pointer;transition:background .15s;
+  }
+  button:hover{background:var(--accent-hover);}
+  button:disabled{opacity:.65;cursor:not-allowed;}
+  .foot{margin-top:18px;font-size:11px;color:var(--mute);text-align:center;line-height:1.7;}
+</style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="brand">
+      <img src="logo.png" alt="logo">
+      <div>
+        <div class="brand-name">RustDesk Console</div>
+        <div class="brand-sub">自建服务管理面板</div>
+      </div>
+    </div>
+
+    <h1>登录管理面板</h1>
+    <p class="tip">请输入管理员账号继续访问</p>
+
+    <div class="err" id="err"></div>
+
+    <form id="loginForm" autocomplete="off">
+      <div class="field">
+        <label for="username">用户名</label>
+        <input id="username" name="username" type="text" placeholder="admin" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" placeholder="请输入密码" autocomplete="current-password" required>
+      </div>
+      <button type="submit" id="submitBtn">登录</button>
+    </form>
+
+    <div class="foot">未授权访问将被拒绝<br>182.44.6.48 · hbbs / hbbr 1.8.7</div>
+  </div>
+
+<script>
+  const form = document.getElementById('loginForm');
+  const errBox = document.getElementById('err');
+  const btn = document.getElementById('submitBtn');
+
+  function showError(msg) {
+    errBox.textContent = msg;
+    errBox.classList.add('show');
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errBox.classList.remove('show');
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    if (!username || !password) return showError('请填写用户名和密码');
+    btn.disabled = true;
+    btn.textContent = '登录中...';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || '登录失败');
+      location.replace('/');
+    } catch (err) {
+      showError(err.message || '登录失败');
+      btn.disabled = false;
+      btn.textContent = '登录';
+    }
+  });
+
+  document.getElementById('username').focus();
+</script>
+</body>
+</html>
