@@ -1,0 +1,14 @@
+[Unit]
+Description=RustDesk ID/Rendezvous Server (hbbs) 1.8.7
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rustdesk-server/bin
+ExecStart=/opt/rustdesk-server/bin/hbbs -k _ -r 182.44.6.48:21117
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
