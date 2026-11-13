@@ -1,0 +1,13 @@
+# 敏感文件 / 运行时数据 —— 公开仓库请勿提交
+auth.json
+github.json
+id_ed25519
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.bak*
+builds/
+build-history.json
+node_modules/
+*.log
