@@ -100,3 +100,19 @@ GitHub 在 dispatch 阶段直接拒绝，check-run annotation 为
 
 **提醒**：本次只修 runner 配置；未配置苹果开发者签名材料时产出的仍是未签名 .ipa，
 需 AltStore / Sideloadly / 企业证书重签才能装真机。
+
+
+## 2026-11-14 定制客户端界面布局优化
+
+- 缩小各区块上下间隔：banner、三步卡片、信息卡片、表单字段、分区标题统一收紧
+  （区块间距 16~20px 改为 10~12px，内边距同步下调，banner 文案区加宽减少换行）。
+- 修复「提交构建」区布局异常：
+  - `.customize-submit-bar` 原 `margin: 16px -18px 0` 的负边距使提交栏左右溢出卡片，
+    改为 `margin: 0`、去掉自身圆角，恢复与卡片对齐；
+  - `.build-progress` 原 `padding: 0`，构建完成后的进度条与「下载客户端」按钮贴着卡片左边缘
+    甚至溢出，补 `12px 18px 14px` 内边距与顶部分隔线；
+  - 卡片统一 `overflow: hidden` 裁切底部圆角；进度条宽度改自适应（最大 420px）。
+- 新增 `.customize-page` 作用域类，所有调整仅作用于定制客户端页，不影响其它管理页面。
+- 静态资源版本号刷新为 `v=20261114a`，避免浏览器缓存旧样式。
+- 服务器备份：`app.js.bak.20261114-layout` / `styles.css.bak.20261114-layout` /
+  `index.html.bak.20261114-layout`。

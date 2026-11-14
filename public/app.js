@@ -1428,7 +1428,7 @@ async function renderBuildHistory() {
 }
 
 function renderClientGen() {
-  $('#content').append(h('div', {}, [
+  $('#content').append(h('div', { class: 'customize-page' }, [
 
     // ======== Banner ========
     h('div', { class: 'customize-banner' }, [

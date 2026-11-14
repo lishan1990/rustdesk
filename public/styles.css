@@ -476,3 +476,36 @@ tbody tr:last-child td { border-bottom: none; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 6px 4px 4px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .legend-item .line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+
+/* ========== 定制客户端页：紧凑间距 + 提交构建区布局修正 (2026-11-14) ========== */
+/* 1) 缩小各区块上下间隔（仅作用于定制客户端页） */
+.customize-page .customize-banner { padding: 16px 20px; margin-bottom: 10px; }
+.customize-page .customize-banner h1 { font-size: 20px; margin-bottom: 4px; }
+.customize-page .customize-banner p { margin-bottom: 10px; line-height: 1.6; max-width: 860px; }
+.customize-page .customize-banner-tags .tag { padding: 3px 10px; }
+.customize-page .customize-steps-row { gap: 10px; margin-bottom: 10px; }
+.customize-page .customize-step-card { padding: 11px 14px; }
+.customize-page .customize-warning { padding: 8px 12px; margin-bottom: 10px; }
+.customize-page .card { margin-bottom: 10px; overflow: hidden; }
+.customize-page .card-head { padding: 10px 16px; }
+.customize-page .card-body { padding: 14px 18px; }
+.customize-page .customize-form-tabs { margin-bottom: 12px; }
+.customize-page .customize-form-tab { padding: 8px 16px; }
+.customize-page .customize-field { margin-bottom: 12px; }
+.customize-page .customize-field-desc { margin-top: 3px; }
+.customize-page .gen-section-title { padding-bottom: 6px; margin-bottom: 10px; }
+.customize-page .platform-cards { gap: 8px; }
+
+/* 2) 提交构建区：消除负 margin 溢出；进度区补内边距；卡片统一裁切圆角 */
+.customize-page .customize-submit-bar {
+  margin: 0; padding: 11px 18px; border-radius: 0;
+  background: #fff; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; align-items: center; gap: 12px;
+}
+.customize-page .build-progress {
+  margin: 0; padding: 12px 18px 14px; border-radius: 0;
+  border-top: 1px solid var(--border-light, #eef0f3);
+}
+.customize-page .build-progress-row { gap: 12px; }
+.customize-page .build-bar { flex: 1 1 auto; width: auto; max-width: 420px; }
+.customize-page .build-note { margin-top: 6px; }
