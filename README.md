@@ -74,3 +74,29 @@
 未配置时 workflow 会生成自签 keystore 并通过 Actions cache 复用。
 
 注意：此前自行签名安装的 APK 与新签名不同，需先卸载旧包再安装新包。
+
+
+## 2026-11-14 iOS 客户端构建 cancelled 修复
+
+**现象**：面板选「iOS 系统」构建后立即报「云端构建失败（cancelled）」；GitHub Actions 上
+`build rustdesk ios ipa` job 在 `generate-bridge` 完成后 1 秒被取消，`runner_id=0`、
+无日志、macOS 计费 0ms，其余 job 全部 skipped。
+
+**根因**：GitHub 于 2026-11-02 退役 macOS 14 runner 镜像。原 iOS job 写死 `runs-on: macos-14`，
+GitHub 在 dispatch 阶段直接拒绝，check-run annotation 为
+`The configuration 'macos-14-arm64-us-default' is not supported`。
+不是手动取消、不是排队过久，重复提交结果一致（11-13 两次 + 11-14 复现共 3 次）。
+
+**修复**：
+- `lishan1990/rustdesk-api-server-pro@rd-client` 的 `.github/workflows/client-build.yml`
+  （commit `9407810cc6b3`）：`build-rustdesk-ios` 的 `runs-on` 改为 `macos-latest`
+  （与官方 RustDesk flutter-build.yml 一致）。
+- 面板 `server.js::pollRun()`：cancelled 提示由「排队过久」改为引导查看 job annotation，
+  并说明 runner 镜像退役这一常见原因。
+
+**验证**：修复后重新 dispatch `target=ios`，iOS job 成功分配到 macOS runner
+（`labels=['macos-latest']`、`runner_id` 非空、`annotations=[]`），前 8 个步骤全部 success
+（含 Write embedded custom config / Install flutter / Setup vcpkg），进入 Install vcpkg dependencies。
+
+**提醒**：本次只修 runner 配置；未配置苹果开发者签名材料时产出的仍是未签名 .ipa，
+需 AltStore / Sideloadly / 企业证书重签才能装真机。

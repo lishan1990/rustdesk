@@ -1319,6 +1319,9 @@ async function pollRun(cfg, runId, job) {
     const run = await ghJson('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}`);
     if (run.status === 'completed') {
       if (run.conclusion !== 'success') {
+        if (run.conclusion === 'cancelled') {
+          throw new Error(`云端构建已被取消（cancelled）。请打开该运行页面，点开被取消的 job 查看 annotation：常见原因是手动取消，或 workflow 指定的 runner 镜像已被 GitHub 停用（例如 macOS 14 镜像已于 2026-11-02 退役，需把 runs-on 改为 macos-15 / macos-latest）。详情：${job.runUrl || ''}`);
+        }
         throw new Error(`云端构建失败（${run.conclusion}），详情：${job.runUrl || ''}`);
       }
       return true;
