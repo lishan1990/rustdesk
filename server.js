@@ -2116,14 +2116,19 @@ app.post('/api/guest/redeem', (req, res) => {
   if (Number(row.used_count) >= Number(row.max_uses)) return res.status(400).json({ error: '该 CDK 已使用完毕' });
   if (row.active_token) {
     const act = cdkRows(`SELECT * FROM cdk_session WHERE token=${cdkQ(row.active_token)}`)[0];
-    if (act && act.expires_at > Date.now())
+    const runningJob = [...buildJobs.values()].find((j) => j.cdkCode === code && (j.status === 'running' || j.status === 'queued'));
+    if (act && act.expires_at > Date.now() && runningJob)
       return res.status(409).json({ error: '该 CDK 正在使用中，请等本次构建完成并下载后再用新 CDK 进入' });
   }
   const token = crypto.randomBytes(24).toString('hex');
   const now = Date.now(), exp = now + 12 * 3600 * 1000;
   cdkRun(`INSERT OR REPLACE INTO cdk_session(token,code,created_at,expires_at) VALUES(${cdkQ(token)},${cdkQ(code)},${now},${exp})`);
   cdkRun(`UPDATE cdk SET status='active', active_token=${cdkQ(token)}, used_ip=${cdkQ(req.ip || '')} WHERE code=${cdkQ(code)}`);
-  res.json({ ok: true, token, code, expiresAt: exp });
+  // 若该 CDK 已有构建成功且未下载的成品（如面板误判失败后恢复），直接带回给游客下载
+  let resumeJob = null;
+  const doneJob = [...buildJobs.values()].find((j) => j.cdkCode === code && j.status === 'success' && j.file && fs.existsSync(j.file));
+  if (doneJob) resumeJob = { id: doneJob.id, fileName: doneJob.fileName, size: doneJob.size, downloadUrl: `/api/guest/download?token=${encodeURIComponent(token)}&id=${encodeURIComponent(doneJob.id)}` };
+  res.json({ ok: true, token, code, expiresAt: exp, resumeJob });
 });
 
 // ---- 游客：提交构建（强制 keepConfig=false，写自己的配置）----

@@ -50,6 +50,20 @@
         if (!res.ok || !res.d.ok) { setError(res.d.error || '兑换失败'); return; }
         state.token = res.d.token; state.code = res.d.code;
         $('#cdkShow').textContent = state.code;
+        if (res.d.resumeJob) {
+          // 该 CDK 已有构建成功的成品（如误判失败后已恢复），直接进入下载
+          state.jobId = res.d.resumeJob.id;
+          $('#buildCard').style.display = '';
+          $('#stepBuild').classList.remove('active');
+          $('#stepBuild').classList.add('done');
+          $('#stepDone').classList.add('active');
+          $('#buildStep').textContent = '构建已完成，即将开始下载…';
+          $('#buildPct').textContent = '100%';
+          $('#buildFill').style.width = '100%';
+          show('viewCustom');
+          startDownload(res.d.resumeJob.downloadUrl);
+          return;
+        }
         show('viewCustom');
       })
       .catch(function (e) { btn.disabled = false; btn.textContent = '验证并进入'; setError('网络错误：' + e.message); });
