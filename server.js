@@ -2050,6 +2050,12 @@ app.get('/api/guest/download', cdkGuestAuth, (req, res) => {
 });
 
 // ---- 管理员：CDK 管理（走现有 session 鉴权）----
+// 测试通知（管理员）：验证智能机器人推送链路
+app.post('/api/cdk/notify-test', (req, res) => {
+  const t = new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  notifyWecom('【逍遥远控】通知链路测试成功\n智能机器人推送已打通\n时间：' + t);
+  res.json({ ok: true, hint: '已提交推送，请查看企业微信群' });
+});
 app.get('/api/cdk/list', (req, res) => {
   res.json({ ok: true, list: cdkRows('SELECT * FROM cdk ORDER BY created_at DESC') });
 });
