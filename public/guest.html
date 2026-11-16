@@ -69,6 +69,17 @@
           <input id="tipInput" class="g-input" type="text" placeholder="ID 和密码下方的灰色小字（可选）">
         </div>
         <div class="g-field">
+          <label class="g-label">应用图标</label>
+          <div class="g-iconrow">
+            <img id="iconPreview" class="g-iconpreview" style="display:none" alt="">
+            <div class="g-iconbtns">
+              <label class="g-iconpick">📁 选择图片<input type="file" id="iconInput" accept="image/png,image/jpeg,image/webp" style="display:none"></label>
+              <button type="button" id="iconClear" class="g-iconclear" style="display:none">清除</button>
+            </div>
+          </div>
+          <div class="g-desc">替换 Windows 程序图标与 Android / iOS 桌面图标。建议 512×512 正方形 PNG，最大 2MB，可选。</div>
+        </div>
+        <div class="g-field">
           <label class="g-label">客户端系统</label>
           <div class="g-radios">
             <label class="g-radio"><input type="radio" name="os" value="windows" checked> Windows（.exe/.msi）</label>

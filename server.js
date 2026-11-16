@@ -68,12 +68,16 @@ const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();
   if (req.path.startsWith('/api/guest/')) return next();
+  if (req.path.startsWith('/icons/')) return next();
   if (currentUser(req)) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: '未登录或会话已过期' });
   return res.redirect('/login.html');
 });
 
 // 静态资源加 no-cache (开发阶段方便调试)
+// 应用图标静态目录（构建时由 GitHub Runner 免登录下载）
+try { fs.mkdirSync(path.join(__dirname, 'icons'), { recursive: true }); } catch (e) {}
+app.use('/icons', express.static(path.join(__dirname, 'icons'), { maxAge: 0 }));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -1446,7 +1450,7 @@ async function runCloudBuild(job) {
     const dispatchAt = Date.now();
     await ghJson('POST', `/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${cfg.workflow}/dispatches`, {
       ref: cfg.branch,
-      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
+      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', 'icon-url': (job.opts && job.opts.iconUrl) || '', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
     });
     const runId = await waitForRun(cfg, dispatchAt, job);
     await pollRun(cfg, runId, job);
@@ -1638,6 +1642,7 @@ app.post('/api/build/start', async (req, res) => {
   if (running) return res.status(409).json({ error: '已有构建任务正在进行，请等待完成' });
 
   const id = 'b' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+  const iconUrl = saveIconData(id, body.icon);
   const job = {
     id,
     status: 'queued',
@@ -1663,6 +1668,7 @@ app.post('/api/build/start', async (req, res) => {
       hideCm: body.hideCm === true || body.hideCm === 'true' || body.hideCm === 'Y',
       // 仅重编源码时沿用云端已保存的 CUSTOM_CONFIG（避免丢失上次填写的固定密码等参数）
       keepConfig: !!body.keepConfig,
+      iconUrl: iconUrl || '',
     },
   };
   buildJobs.set(id, job);
@@ -1753,6 +1759,27 @@ function notifyPublicUrl() {
   const cfg = loadNotifyCfg();
   return String(cfg.publicUrl || 'http://182.44.6.48:21120').replace(/\/+$/, '');
 }
+// ---- 应用图标上传：保存到 icons/，返回免登录下载 URL（空=未上传或不合法）----
+function saveIconData(jobId, raw) {
+  try {
+    if (!raw) return '';
+    let data = String(raw).trim();
+    let ext = 'png';
+    const m = data.match(/^data:image\/(png|jpe?g|webp);base64,([\s\S]*)$/);
+    if (m) { ext = (m[1] === 'jpeg' || m[1] === 'jpg') ? 'jpg' : (m[1] === 'webp' ? 'webp' : 'png'); data = m[2]; }
+    const buf = Buffer.from(data.replace(/\s+/g, ''), 'base64');
+    if (!buf.length || buf.length > 2 * 1024 * 1024) return '';
+    const b0 = buf[0], b1 = buf[1];
+    const ok = (b0 === 0x89 && b1 === 0x50) || (b0 === 0xff && b1 === 0xd8) || (buf.slice(0, 4).toString('latin1') === 'RIFF');
+    if (!ok) return '';
+    const file = path.join(__dirname, 'icons', jobId + '.' + ext);
+    fs.writeFileSync(file, buf);
+    return notifyPublicUrl() + '/icons/' + jobId + '.' + ext;
+  } catch (e) { console.warn('[icon] save failed:', e.message); return ''; }
+}
+function cleanIconFile(jobId) {
+  try { for (const f of ['png', 'jpg', 'webp']) fs.unlinkSync(path.join(__dirname, 'icons', jobId + '.' + f)); } catch (e) {}
+}
 function buildDirectToken(id) {
   let secret = '';
   try { secret = String(loadNotifyCfg().notifySecret || ''); } catch (e) {}
@@ -1834,6 +1861,7 @@ app.get('/api/build/download', (req, res) => {
     }
     try { fs.unlinkSync(filePath); } catch (e) {}
     try { fs.rmSync(path.join(BUILD_DIR, id), { recursive: true, force: true }); } catch (e) {}
+    cleanIconFile(id);
     if (job) {
       job.downloaded = true;
       job.file = null;
@@ -2225,6 +2253,7 @@ app.post('/api/guest/build', cdkGuestAuth, async (req, res) => {
   if (running) return res.status(409).json({ error: '已有构建任务正在进行，请等完成后再提交' });
   try { cdkRun(`UPDATE cdk SET brand=${cdkQ(brand)} WHERE code=${cdkQ(req.cdkGuest.code)}`); } catch (e) {}
   const id = 'g' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+  const iconUrl = saveIconData(id, body.icon);
   const job = {
     id, status: 'queued', progress: 0, step: '已加入构建队列',
     createdAt: Date.now(), updatedAt: Date.now(),
@@ -2246,6 +2275,7 @@ app.post('/api/guest/build', cdkGuestAuth, async (req, res) => {
       allowTempPassword: body.allowTempPassword === true || body.allowTempPassword === 'true' || body.allowTempPassword === 'Y',
       hideCm: body.hideCm === true || body.hideCm === 'true' || body.hideCm === 'Y',
       keepConfig: false,
+      iconUrl: iconUrl || '',
     },
   };
   buildJobs.set(id, job);

@@ -87,12 +87,36 @@
   // ---- 退出 ----
   $('#exitBtn').addEventListener('click', function () {
     state.token = ''; state.jobId = '';
+    try { resetIcon(); } catch (e) {}
     if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
     show('viewRedeem');
     setError('');
     $('#cdkInput').value = '';
   });
   $('#againBtn').addEventListener('click', function () { location.reload(); });
+
+  // ---- 应用图标 ----
+  var iconData = '';
+  $('#iconInput').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { toast('图标图片不能超过 2MB'); e.target.value = ''; return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      iconData = String(rd.result || '');
+      var pv = $('#iconPreview');
+      pv.src = iconData; pv.style.display = '';
+      $('#iconClear').style.display = '';
+    };
+    rd.readAsDataURL(f);
+  });
+  function resetIcon() {
+    iconData = '';
+    $('#iconInput').value = '';
+    $('#iconPreview').style.display = 'none';
+    $('#iconClear').style.display = 'none';
+  }
+  $('#iconClear').addEventListener('click', resetIcon);
 
   // ---- 提交构建 ----
   $('#submitBtn').addEventListener('click', function () {
@@ -105,6 +129,7 @@
       conn: radio('conn') || 'agent',
       style: radio('style') || 'portable',
       all: checked('buildAll'),
+      icon: iconData,
       prompt: val('tipInput'),
       host: val('idServerInput'),
       relay: val('relayInput'),

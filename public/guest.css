@@ -72,3 +72,12 @@
   .g-submit-bar { margin: 8px -18px -20px; padding: 16px 18px; }
   .g-progress-steps { flex-wrap: wrap; }
 }
+
+/* 应用图标上传 */
+.g-iconrow { display: flex; align-items: center; gap: 12px; }
+.g-iconpreview { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; border: 1px solid #e5e6eb; background: #fff; }
+.g-iconbtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.g-iconpick { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid #dcdfe4; border-radius: 8px; cursor: pointer; font-size: 13px; color: #4e5969; background: #fff; }
+.g-iconpick:hover { border-color: #165dff; color: #165dff; }
+.g-iconclear { padding: 8px 14px; border: 1px solid #dcdfe4; border-radius: 8px; background: #fff; color: #86909c; font-size: 13px; cursor: pointer; }
+.g-iconclear:hover { color: #f53f3f; border-color: #f53f3f; }
