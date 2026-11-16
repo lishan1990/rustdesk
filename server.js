@@ -1480,6 +1480,22 @@ async function runCloudBuild(job) {
     job.successAt = Date.now();
     setJob(job, 100, '构建完成，可下载客户端');
     recordBuildHistory(job);
+    // 构建成功通知（仅游客任务）
+    if (job.cdkCode) {
+      const o2 = job.opts || {};
+      const osLabel2 = o2.all ? 'Windows+Android+iOS' : ({ windows: 'Windows', android: 'Android', ios: 'iOS' }[o2.os] || o2.os || '');
+      const fmtT3 = (ts) => { const d = new Date(ts + 8 * 3600 * 1000); return d.toISOString().replace('T', ' ').slice(0, 19); };
+      const mb = (job.size || 0) > 0 ? (job.size / 1024 / 1024).toFixed(1) + ' MB' : '-';
+      notifyWecom(
+        '【逍遥远控】定制客户端构建成功，等待游客下载\n' +
+        'CDK：' + job.cdkCode + '\n' +
+        '品牌名：' + (o2.brand || '-') + '\n' +
+        '系统：' + osLabel2 + '\n' +
+        '服务端：' + (o2.host || '-') + '\n' +
+        '安装包：' + (job.fileName || '-') + '（' + mb + '）\n' +
+        '时间：' + fmtT3(Date.now())
+      );
+    }
   } catch (e) {
     job.status = 'failed';
     job.error = e.message || String(e);
