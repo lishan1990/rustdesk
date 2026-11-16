@@ -2054,3 +2054,84 @@ async function delCdk(code) {
   try { await postJson('/api/cdk/delete', { code }); toast('已删除'); gotoPage('cdk-manage'); }
   catch (e) { toast(e.message, 'err'); }
 }
+
+
+// ===== SaaS 定制：构建历史复制链接 + 通知设置页 =====
+async function copyBuildLink(id, kind) {
+  try {
+    const d = await api('/api/build/links?id=' + encodeURIComponent(id));
+    if (kind === 'guest') {
+      if (!d.guestUrl) { toast('该记录未关联 CDK，没有游客链接', 'err'); return; }
+      copyText(d.guestUrl, '游客下载链接已复制（含 CDK，发给客户即可）');
+    } else {
+      copyText(d.directUrl, '管理员直链已复制（无需登录，不影响游客下载）');
+    }
+  } catch (e) { toast('获取链接失败：' + (e.message || e), 'err'); }
+}
+
+async function renderNotifyCfg() {
+  loading();
+  let d = {};
+  try { d = await api('/api/notify/config'); } catch (e) {
+    $('#content').innerHTML = '';
+    $('#content').appendChild(errorBox(e));
+    return;
+  }
+  $('#content').innerHTML = '';
+  $('#content').appendChild(h('div', {}, [
+    pageHead('通知设置', '配置企业微信智能机器人 / 群聊机器人 Webhook。游客构建成功、构建失败、下载完成后会自动推送通知到群。'),
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-head' }, [
+        h('span', { class: 'card-title' }, '企业微信智能机器人（推荐）'),
+        d.aibotConnected ? badge('长连接已连接', 'ok') : badge('未连接', 'muted'),
+      ]),
+      h('div', { class: 'card-body' }, [
+        h('div', { class: 'form-row' }, [
+          field('BotID', h('input', { class: 'form-input', type: 'text', id: 'ntBotId', value: d.botId || '', placeholder: '管理后台 → 智能机器人 → API 模式 → 长连接生成' })),
+          field('Secret', h('input', { class: 'form-input', type: 'password', id: 'ntSecret', placeholder: d.secretSet ? ('已配置（…' + (d.secretTail || '') + '），留空保持不变') : '未配置，请输入 Secret' })),
+          field('公网地址（通知中下载链接使用）', h('input', { class: 'form-input', type: 'text', id: 'ntPublicUrl', value: d.publicUrl || '', placeholder: 'http://182.44.6.48:21120' })),
+        ]),
+        h('div', { class: 'text-muted text-sm', style: 'margin-top:8px' },
+          '获取方式：企业微信管理后台 → 安全与管理 → 管理工具 → 智能机器人 → 编辑 → API 模式 → 连接方式选「使用长连接」，页面会生成 BotID 和 Secret。'),
+        (d.chats && d.chats.length)
+          ? h('div', { class: 'text-sm', style: 'margin-top:10px' }, [
+              h('span', { class: 'text-muted' }, '已捕获会话：'),
+              ...d.chats.map(c => h('span', { class: 'mono-sm', style: 'margin-right:12px' }, (Number(c.chatType) === 1 ? '单聊 ' : '群聊 ') + c.chatid)),
+            ])
+          : h('div', { class: 'text-muted text-sm', style: 'margin-top:10px' }, '暂无会话：请把机器人拉进群并 @它 发一条消息，系统会自动记录该会话，通知将发到该会话。'),
+      ]),
+    ]),
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-head' }, [h('span', { class: 'card-title' }, '群聊机器人 Webhook（备用通道）')]),
+      h('div', { class: 'card-body' }, [
+        field('Webhook 地址', h('input', { class: 'form-input', type: 'text', id: 'ntWebhook', value: d.webhook || '', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx' })),
+        h('div', { class: 'text-muted text-sm', style: 'margin-top:8px' }, '智能机器人已配置时优先走智能机器人长连接；两者都未配置时通知静默跳过，不影响业务。'),
+      ]),
+    ]),
+    h('div', { style: 'display:flex;gap:10px;margin-top:4px' }, [
+      h('button', { class: 'btn btn-primary', onclick: saveNotifyCfg }, '保存配置'),
+      h('button', { class: 'btn btn-secondary', onclick: sendNotifyTest }, '发送测试通知'),
+    ]),
+  ]));
+}
+
+async function saveNotifyCfg() {
+  const body = {
+    botId: ($('#ntBotId') || {}).value || '',
+    secret: ($('#ntSecret') || {}).value || '',
+    webhook: ($('#ntWebhook') || {}).value || '',
+    publicUrl: ($('#ntPublicUrl') || {}).value || '',
+  };
+  try {
+    await postJson('/api/notify/config', body);
+    toast('配置已保存，智能机器人正在重新连接…');
+    setTimeout(() => { if (currentPage === 'notify-cfg') renderNotifyCfg(); }, 1500);
+  } catch (e) { toast('保存失败：' + (e.message || e), 'err'); }
+}
+
+async function sendNotifyTest() {
+  try {
+    await postJson('/api/cdk/notify-test', {});
+    toast('测试通知已提交，请查看企业微信群');
+  } catch (e) { toast('发送失败：' + (e.message || e), 'err'); }
+}
