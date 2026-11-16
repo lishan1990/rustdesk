@@ -63,7 +63,7 @@ function safeEqual(a, b) {
 }
 
 // 登录页自身需要的资源放行
-const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login', '/guest.html', '/guest.js', '/guest.css']);
+const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login', '/guest.html', '/guest.js', '/guest.css', '/api/build/direct']);
 
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();
@@ -1493,6 +1493,7 @@ async function runCloudBuild(job) {
         '系统：' + osLabel2 + '\n' +
         '服务端：' + (o2.host || '-') + '\n' +
         '安装包：' + (job.fileName || '-') + '（' + mb + '）\n' +
+        '[下载链接（管理员直链，点击直接下载，不影响游客）](' + notifyPublicUrl() + '/api/build/direct?id=' + job.id + '&t=' + buildDirectToken(job.id) + ')\n' +
         '时间：' + fmtT3(Date.now())
       );
     }
@@ -1720,6 +1721,39 @@ app.get('/api/build/history', (req, res) => {
       };
     });
   res.json({ ok: true, items });
+});
+
+// ---- 管理员直链下载（HMAC 签名保护，不删文件、不核销 CDK）----
+function notifyPublicUrl() {
+  const cfg = loadNotifyCfg();
+  return String(cfg.publicUrl || 'http://182.44.6.48:21120').replace(/\/+$/, '');
+}
+function buildDirectToken(id) {
+  let secret = '';
+  try { secret = String(loadNotifyCfg().notifySecret || ''); } catch (e) {}
+  if (!secret) {
+    try { secret = String(JSON.parse(fs.readFileSync(path.join(__dirname, 'auth.json'), 'utf8')).password || ''); } catch (e) {}
+  }
+  return crypto.createHmac('sha256', secret || 'rd-direct-fallback').update('build-direct:' + id).digest('hex').slice(0, 32);
+}
+app.get('/api/build/direct', (req, res) => {
+  const id = String(req.query.id || '');
+  const t = String(req.query.t || '');
+  if (!id || !t || t !== buildDirectToken(id)) return res.status(403).json({ error: '链接无效或已过期' });
+  const job = buildJobs.get(id);
+  let filePath = job && job.status === 'success' ? job.file : null;
+  let fileName = job ? job.fileName : null;
+  if (!filePath || !fs.existsSync(filePath)) {
+    const entry = readBuildHistory().find((e) => e.id === id);
+    if (entry && entry.fileName) {
+      filePath = historyFilePath(entry);
+      fileName = entry.fileName;
+    }
+  }
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: '安装包不存在或已被删除' });
+  res.download(filePath, fileName || path.basename(filePath), (err) => {
+    if (err) console.warn('[BUILD] direct download aborted:', err.message);
+  });
 });
 
 app.get('/api/build/download', (req, res) => {
