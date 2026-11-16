@@ -1743,6 +1743,30 @@ setInterval(() => {
 // ============================================================
 // 2026-11-16 新增：游客 CDK 定制客户端（独立数据库 + 公开 API）
 // 游客凭 CDK 兑换一次性会话 → 填自己的服务端配置 → 复用云端编译
+// ---- 企业微信机器人通知（下载完成后推送）----
+const NOTIFY_CFG_PATH = path.join(__dirname, 'notify.json');
+function loadNotifyCfg() {
+  try { return JSON.parse(fs.readFileSync(NOTIFY_CFG_PATH, 'utf8')); } catch (e) { return {}; }
+}
+function notifyWecom(text) {
+  const cfg = loadNotifyCfg();
+  const url = String(cfg.wecomWebhook || '').trim();
+  if (!url || url.indexOf('https://qyapi.weixin.qq.com/cgi-bin/webhook/send') !== 0) return;
+  try {
+    const u = new URL(url);
+    const data = JSON.stringify({ msgtype: 'text', text: { content: text } });
+    const req = https.request({
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      timeout: 8000,
+    }, (r) => { r.resume(); });
+    req.on('error', (e) => console.warn('[notify] wecom send failed:', e.message));
+    req.on('timeout', () => req.destroy());
+    req.write(data);
+    req.end();
+  } catch (e) { console.warn('[notify] wecom error:', e.message); }
+}
+
 // → 下载完成后自动核销 CDK → 刷新回兑换页，可用新 CDK 再次进入。
 // 编译链路仍是全局串行 + 每次强制重写 CUSTOM_CONFIG，配置天然隔离。
 // ============================================================
@@ -1893,6 +1917,19 @@ app.get('/api/guest/download', cdkGuestAuth, (req, res) => {
     cdkRun(`UPDATE cdk SET status=${cdkQ(remain > 0 ? 'unused' : 'used')} WHERE code=${cdkQ(code)}`);
     job.downloaded = true; job.file = null; job.step = '已下载，CDK 已核销';
     console.log(`[CDK ${code}] redeemed by download job ${id}, remain=${remain}`);
+    const o = job.opts || {};
+    const osLabel = o.all ? 'Windows+Android+iOS' : ({ windows: 'Windows', android: 'Android', ios: 'iOS' }[o.os] || o.os || '');
+    const fmtT = (ts) => { const d = new Date(ts + 8 * 3600 * 1000); return d.toISOString().replace('T', ' ').slice(0, 19); };
+    notifyWecom(
+      '【逍遥远控】定制客户端下载完成\n' +
+      'CDK：' + code + '\n' +
+      '品牌名：' + (o.brand || '-') + '\n' +
+      '系统：' + osLabel + '\n' +
+      '服务端：' + (o.host || '-') + '\n' +
+      '游客IP：' + (req.ip || '-') + '\n' +
+      '剩余次数：' + remain + '\n' +
+      '时间：' + fmtT(now)
+    );
   });
 });
 
