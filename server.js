@@ -1758,15 +1758,67 @@ setInterval(() => {
 // ============================================================
 // 2026-11-16 新增：游客 CDK 定制客户端（独立数据库 + 公开 API）
 // 游客凭 CDK 兑换一次性会话 → 填自己的服务端配置 → 复用云端编译
-// ---- 企业微信机器人通知（下载完成后推送）----
+// ---- 企业微信智能机器人通知（WebSocket 长连接 + 主动推送，webhook 作备用通道）----
 const NOTIFY_CFG_PATH = path.join(__dirname, 'notify.json');
+const AIBOT_CHATS_PATH = path.join(__dirname, 'aibot-chats.json');
 function loadNotifyCfg() {
   try { return JSON.parse(fs.readFileSync(NOTIFY_CFG_PATH, 'utf8')); } catch (e) { return {}; }
 }
+let aibotWs = null;
+let aibotPingTimer = null;
+let aibotReconnectTimer = null;
+let aibotReconnectDelay = 5000;
+
+function loadAibotChats() {
+  try {
+    const o = JSON.parse(fs.readFileSync(AIBOT_CHATS_PATH, 'utf8'));
+    return Array.isArray(o.chats) ? o.chats : [];
+  } catch (e) { return []; }
+}
+function saveAibotChat(chatid, chatType) {
+  if (!chatid) return;
+  const chats = loadAibotChats();
+  if (chats.some((c) => c.chatid === chatid)) return;
+  chats.push({ chatid: chatid, chatType: chatType || 0, foundAt: Date.now() });
+  try { fs.writeFileSync(AIBOT_CHATS_PATH, JSON.stringify({ chats: chats }, null, 2)); } catch (e) {}
+  console.log('[notify] aibot 发现新会话 chatid=' + chatid + ' chatType=' + chatType + '，通知将发送到该会话');
+}
+
+function aibotSend(frame) {
+  if (!aibotWs || aibotWs.readyState !== 1) return false;
+  if (!frame.headers) frame.headers = {};
+  if (!frame.headers.req_id) frame.headers.req_id = 'req' + Date.now() + Math.random().toString(36).slice(2, 8);
+  try { aibotWs.send(JSON.stringify(frame)); return true; } catch (e) { console.warn('[notify] aibot 发送失败:', e.message); return false; }
+}
+
 function notifyWecom(text) {
   const cfg = loadNotifyCfg();
+  const bot = cfg.aibot || {};
+  const hasBot = String(bot.botId || '').trim() && String(bot.secret || '').trim();
   const url = String(cfg.wecomWebhook || '').trim();
-  if (!url || url.indexOf('https://qyapi.weixin.qq.com/cgi-bin/webhook/send') !== 0) return;
+  if (!hasBot && !(url && url.indexOf('https://qyapi.weixin.qq.com/cgi-bin/webhook/send') === 0)) return;
+  if (hasBot) {
+    const chats = (Array.isArray(bot.chats) && bot.chats.length) ? bot.chats : loadAibotChats();
+    if (!chats.length) {
+      console.warn('[notify] aibot 已配置但暂无已知会话：请先在群里 @机器人 或单聊给机器人发一条消息');
+      return;
+    }
+    let sent = 0;
+    for (const c of chats) {
+      const ok = aibotSend({
+        cmd: 'aibot_send_msg',
+        body: {
+          chatid: c.chatid,
+          chat_type: Number(c.chatType) === 1 ? 1 : 2,
+          msgtype: 'markdown',
+          markdown: { content: text },
+        },
+      });
+      if (ok) sent++;
+    }
+    if (!sent) console.warn('[notify] aibot 未连接，本次通知未发出');
+    return;
+  }
   try {
     const u = new URL(url);
     const data = JSON.stringify({ msgtype: 'text', text: { content: text } });
@@ -1781,6 +1833,55 @@ function notifyWecom(text) {
     req.end();
   } catch (e) { console.warn('[notify] wecom error:', e.message); }
 }
+
+function aibotConnect() {
+  const cfg = loadNotifyCfg();
+  const bot = cfg.aibot || {};
+  const botId = String(bot.botId || '').trim();
+  const secret = String(bot.secret || '').trim();
+  if (!botId || !secret) return;
+  if (aibotWs) { try { aibotWs.removeAllListeners(); aibotWs.close(); } catch (e) {} aibotWs = null; }
+  let WsImpl;
+  try { WsImpl = require('ws'); } catch (e) { console.warn('[notify] 缺少 ws 依赖（npm install ws），无法连接智能机器人'); return; }
+  const ws = new WsImpl('wss://openws.work.weixin.qq.com');
+  aibotWs = ws;
+  ws.on('open', () => {
+    aibotReconnectDelay = 5000;
+    console.log('[notify] aibot 长连接已建立，正在订阅…');
+    aibotSend({ cmd: 'aibot_subscribe', body: { bot_id: botId, secret: secret } });
+  });
+  ws.on('message', (buf) => {
+    let frame;
+    try { frame = JSON.parse(buf.toString()); } catch (e) { return; }
+    if (frame.errcode !== undefined) {
+      if (frame.errcode === 0) console.log('[notify] aibot 响应 ok');
+      else console.warn('[notify] aibot 响应错误 errcode=' + frame.errcode + ' errmsg=' + (frame.errmsg || ''));
+      return;
+    }
+    const cmd = String(frame.cmd || '');
+    if (cmd === 'aibot_msg_callback' || cmd === 'aibot_event_callback') {
+      const b = frame.body || {};
+      const chatType = b.chattype === 'single' ? 1 : 2;
+      const cid = b.chatid || (b.from && b.from.userid) || '';
+      saveAibotChat(cid, chatType);
+      console.log('[notify] aibot 收到回调 ' + cmd + ': ' + JSON.stringify(b).slice(0, 300));
+    }
+  });
+  ws.on('error', (e) => console.warn('[notify] aibot 连接错误:', e.message));
+  ws.on('close', () => {
+    if (aibotWs !== ws) return;
+    aibotWs = null;
+    console.warn('[notify] aibot 连接断开，' + Math.round(aibotReconnectDelay / 1000) + 's 后重连');
+    if (aibotReconnectTimer) return;
+    aibotReconnectTimer = setTimeout(() => { aibotReconnectTimer = null; aibotConnect(); }, aibotReconnectDelay);
+    aibotReconnectDelay = Math.min(aibotReconnectDelay * 2, 60000);
+  });
+  if (aibotPingTimer) clearInterval(aibotPingTimer);
+  aibotPingTimer = setInterval(() => {
+    if (aibotWs && aibotWs.readyState === 1) aibotSend({ cmd: 'ping' });
+  }, 25 * 1000);
+}
+aibotConnect();
 
 // → 下载完成后自动核销 CDK → 刷新回兑换页，可用新 CDK 再次进入。
 // 编译链路仍是全局串行 + 每次强制重写 CUSTOM_CONFIG，配置天然隔离。
