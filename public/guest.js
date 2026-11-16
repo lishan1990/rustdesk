@@ -6,6 +6,20 @@
 
   var state = { token: '', code: '', jobId: '', pollTimer: null, downloading: false };
 
+  // guest.html?cdk=XXXX：预填兑换码并自动进入
+  window.addEventListener('load', function () {
+    try {
+      var q = new URLSearchParams(location.search);
+      var pre = (q.get('cdk') || '').trim().toUpperCase();
+      if (!pre) return;
+      var inp = document.getElementById('cdkInput');
+      if (!inp) return;
+      inp.value = pre;
+      var b = document.getElementById('redeemBtn');
+      if (b) b.click();
+    } catch (e) {}
+  });
+
   function show(view) {
     ['viewRedeem', 'viewCustom', 'viewDone'].forEach(function (v) {
       var el = document.getElementById(v);

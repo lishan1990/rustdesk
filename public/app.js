@@ -20,7 +20,8 @@ const PAGES = {
   'client-gen':{ group: '客户端定制', title: '定制客户端', render: renderClientGen,   crumb: ['客户端定制', '定制客户端'] },
   'build-env': { group: '客户端定制', title: '构建环境配置', render: renderBuildEnv,  crumb: ['客户端定制', '构建环境配置'] },
   'build-history':{ group: '客户端定制', title: '构建历史', render: renderBuildHistory, crumb: ['客户端定制', '构建历史'] },
-  'cdk-manage':{ group: '客户端定制', title: 'CDK 管理', render: renderCdkManage, crumb: ['客户端定制', 'CDK 管理'] },
+  'cdk-manage':{ group: 'SaaS定制', title: 'CDK 管理', render: renderCdkManage, crumb: ['SaaS定制', 'CDK 管理'] },
+  'notify-cfg':{ group: 'SaaS定制', title: '通知设置', render: renderNotifyCfg, crumb: ['SaaS定制', '通知设置'] },
 };
 
 let currentPage = 'overview';
@@ -1407,7 +1408,7 @@ async function renderBuildHistory() {
             h('thead', {}, [h('tr', {}, [
               h('th', {}, '品牌名'), h('th', {}, '界面语言'), h('th', {}, '连接类型'),
               h('th', {}, '款式'), h('th', {}, '客户端系统'), h('th', {}, '构建提交日期'),
-              h('th', {}, '构建成功时间'), h('th', {}, '下载链接'), h('th', {}, '是否失效'),
+              h('th', {}, '构建成功时间'), h('th', {}, '下载链接'), h('th', {}, '复制链接'), h('th', {}, '是否失效'),
             ])]),
             h('tbody', {}, items.map(it => h('tr', {}, [
               h('td', {}, it.brand || '—'),
@@ -1419,6 +1420,12 @@ async function renderBuildHistory() {
               h('td', {}, h('span', { class: 'mono-sm' }, fmtDT(it.successAt))),
               h('td', {}, it.downloadUrl
                 ? h('a', { class: 'btn-link', href: it.downloadUrl, download: '' }, '下载客户端')
+                : h('span', { class: 'text-muted' }, '—')),
+              h('td', {}, it.downloadUrl
+                ? h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+                    h('button', { class: 'btn-link', onclick: () => copyBuildLink(it.id, 'guest') }, '游客链接'),
+                    h('button', { class: 'btn-link', onclick: () => copyBuildLink(it.id, 'direct') }, '管理员直链'),
+                  ])
                 : h('span', { class: 'text-muted' }, '—')),
               h('td', {}, it.expired ? badge('已失效', 'err') : badge('有效', 'ok')),
             ]))),

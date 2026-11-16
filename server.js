@@ -1758,6 +1758,34 @@ function buildDirectToken(id) {
   }
   return crypto.createHmac('sha256', secret || 'rd-direct-fallback').update('build-direct:' + id).digest('hex').slice(0, 32);
 }
+// ---- 构建记录下载链接（管理页复制用）----
+app.get('/api/build/links', (req, res) => {
+  const id = String(req.query.id || '');
+  const job = buildJobs.get(id);
+  const entry = readBuildHistory().find((e) => e.id === id);
+  if (!job && !entry) return res.status(404).json({ error: '记录不存在' });
+  const base = notifyPublicUrl();
+  let cdkCode = (job && job.cdkCode) || (entry && entry.cdkCode) || '';
+  if (!cdkCode) {
+    try {
+      const crow = cdkRows('SELECT code FROM cdk WHERE job_id=' + cdkQ(id) + ' LIMIT 1')[0];
+      if (crow) cdkCode = crow.code;
+    } catch (e) {}
+  }
+  const hasFile = job
+    ? (job.status === 'success' && job.file && fs.existsSync(job.file))
+    : !!(entry && entry.fileName && fs.existsSync(historyFilePath(entry)));
+  res.json({
+    ok: true,
+    id: id,
+    fileName: (job && job.fileName) || (entry && entry.fileName) || '',
+    expired: entry ? !!entry.expired : false,
+    hasFile: hasFile,
+    directUrl: base + '/api/build/direct?id=' + encodeURIComponent(id) + '&t=' + buildDirectToken(id),
+    guestUrl: cdkCode ? base + '/guest.html?cdk=' + encodeURIComponent(cdkCode) : '',
+  });
+});
+
 app.get('/api/build/direct', (req, res) => {
   const id = String(req.query.id || '');
   const t = String(req.query.t || '');
@@ -2233,6 +2261,40 @@ app.post('/api/cdk/notify-test', (req, res) => {
   notifyWecom('【逍遥远控】通知链路测试成功\n智能机器人推送已打通\n时间：' + t);
   res.json({ ok: true, hint: '已提交推送，请查看企业微信群' });
 });
+// ---- 通知配置管理（智能机器人 / webhook）----
+app.get('/api/notify/config', (req, res) => {
+  const cfg = loadNotifyCfg();
+  const bot = cfg.aibot || {};
+  const secret = String(bot.secret || '');
+  res.json({
+    ok: true,
+    botId: String(bot.botId || ''),
+    secretSet: !!secret,
+    secretTail: secret.slice(-4),
+    webhook: String(cfg.wecomWebhook || ''),
+    publicUrl: String(cfg.publicUrl || ''),
+    aibotConnected: !!(aibotWs && aibotWs.readyState === 1),
+    chats: loadAibotChats(),
+  });
+});
+app.post('/api/notify/config', (req, res) => {
+  const b = req.body || {};
+  const cfg = loadNotifyCfg();
+  if (!cfg.aibot || typeof cfg.aibot !== 'object') cfg.aibot = {};
+  cfg.aibot.botId = String(b.botId === undefined ? cfg.aibot.botId || '' : b.botId).trim();
+  const sec = String(b.secret === undefined ? '' : b.secret).trim();
+  if (sec) cfg.aibot.secret = sec;
+  if (!cfg.aibot.botId) delete cfg.aibot.secret;
+  cfg.wecomWebhook = String(b.webhook === undefined ? cfg.wecomWebhook || '' : b.webhook).trim();
+  cfg.publicUrl = String(b.publicUrl === undefined ? cfg.publicUrl || '' : b.publicUrl).trim();
+  try { fs.writeFileSync(NOTIFY_CFG_PATH, JSON.stringify(cfg, null, 2)); }
+  catch (e) { return res.status(500).json({ error: '写入配置失败：' + e.message }); }
+  console.log('[notify] 配置已通过管理页更新，正在重连…');
+  if (String(cfg.aibot.botId || '').trim() && String(cfg.aibot.secret || '').trim()) aibotConnect();
+  else if (aibotWs) { try { aibotWs.removeAllListeners(); aibotWs.close(); } catch (e) {} aibotWs = null; }
+  res.json({ ok: true });
+});
+
 app.get('/api/cdk/list', (req, res) => {
   res.json({ ok: true, list: cdkRows('SELECT * FROM cdk ORDER BY created_at DESC') });
 });
