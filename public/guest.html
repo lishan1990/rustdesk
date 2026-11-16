@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>定制客户端 · 兑换中心</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/guest.css?v=20261116a">
+</head>
+<body class="guest-body">
+<div id="guestRoot">
+  <!-- 视图1：CDK 输入 -->
+  <section id="viewRedeem" class="g-wrap">
+    <div class="g-hero">
+      <div class="g-logo">逍</div>
+      <h1>专属客户端定制中心</h1>
+      <p>输入兑换码，填写你自己的服务器与品牌信息，云端自动生成专属安装包</p>
+    </div>
+    <div class="g-card">
+      <h2>兑换码进入</h2>
+      <p class="g-hint">每个兑换码可使用一次，下载完成后自动失效。请使用有效的 CDK 进入定制页面。</p>
+      <label class="g-label" for="cdkInput">兑换码（CDK）</label>
+      <input id="cdkInput" class="g-input" type="text" placeholder="例如 RD-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+      <div id="cdkError" class="g-error"></div>
+      <button id="redeemBtn" class="g-btn g-btn-primary">验证并进入</button>
+      <p class="g-foot-note">没有兑换码？请联系服务提供方获取。</p>
+    </div>
+  </section>
+
+  <!-- 视图2：定制表单 -->
+  <section id="viewCustom" class="g-wrap" style="display:none">
+    <div class="g-topbar">
+      <span class="g-topbar-title">定制你的客户端</span>
+      <span class="g-cdk-tag">兑换码：<b id="cdkShow"></b></span>
+      <button id="exitBtn" class="g-btn-link">退出</button>
+    </div>
+    <div class="g-progress-steps">
+      <span class="g-step active">1. 填写信息</span>
+      <span class="g-step-arrow">›</span>
+      <span class="g-step" id="stepBuild">2. 云端生成</span>
+      <span class="g-step-arrow">›</span>
+      <span class="g-step" id="stepDone">3. 下载完成</span>
+    </div>
+
+    <div class="g-card">
+      <div class="g-tabs" id="gTabs">
+        <div class="g-tab active" data-tab="basic">基础</div>
+        <div class="g-tab" data-tab="server">服务器</div>
+        <div class="g-tab" data-tab="security">安全</div>
+        <div class="g-tab" data-tab="other">其他</div>
+      </div>
+
+      <!-- 基础 -->
+      <div class="g-panel" data-panel="basic">
+        <div class="g-field">
+          <label class="g-label">品牌名 <span class="g-req">*</span></label>
+          <input id="brandInput" class="g-input" type="text" placeholder="例：逍遥远程">
+          <div class="g-desc">显示在客户端标题与安装包名称。支持中文；只能用中英文、数字、-、_，不能有空格或符号。</div>
+        </div>
+        <div class="g-field">
+          <label class="g-label">界面语言</label>
+          <div class="g-radios">
+            <label class="g-radio"><input type="radio" name="lang" value="zh" checked> 中文版</label>
+            <label class="g-radio"><input type="radio" name="lang" value="en"> 英文版</label>
+          </div>
+        </div>
+        <div class="g-field">
+          <label class="g-label">提示语</label>
+          <input id="tipInput" class="g-input" type="text" placeholder="ID 和密码下方的灰色小字（可选）">
+        </div>
+        <div class="g-field">
+          <label class="g-label">客户端系统</label>
+          <div class="g-radios">
+            <label class="g-radio"><input type="radio" name="os" value="windows" checked> Windows（.exe/.msi）</label>
+            <label class="g-radio"><input type="radio" name="os" value="android"> Android（.apk）</label>
+            <label class="g-radio"><input type="radio" name="os" value="ios"> iOS（.ipa）</label>
+          </div>
+          <label class="g-checkline"><input type="checkbox" id="buildAll"> 同时构建三系统安装包（Windows + Android + iOS，耗时约为单系统三倍）</label>
+          <div class="g-desc">iOS 未配置苹果签名时产出未签名 .ipa，需自行重签后安装。</div>
+        </div>
+      </div>
+
+      <!-- 服务器 -->
+      <div class="g-panel" data-panel="server" style="display:none">
+        <div class="g-field">
+          <label class="g-label">ID 服务器 <span class="g-req">*</span></label>
+          <input id="idServerInput" class="g-input" type="text" placeholder="例：your.domain.com:21116">
+          <div class="g-desc">客户端发现服务地址（主机:端口）。</div>
+        </div>
+        <div class="g-field">
+          <label class="g-label">中继服务器</label>
+          <input id="relayInput" class="g-input" type="text" placeholder="例：your.domain.com:21117">
+        </div>
+        <div class="g-field">
+          <label class="g-label">API 服务器</label>
+          <input id="apiServerInput" class="g-input" type="text" placeholder="例：http://your.domain.com:21114">
+        </div>
+        <div class="g-field">
+          <label class="g-label">服务器密钥 Key <span class="g-req">*</span></label>
+          <input id="keyInput" class="g-input" type="text" placeholder="与你服务端 id_ed25519.pub 一致">
+          <div class="g-desc">必须与你自建服务端的公钥一致，否则客户端无法连接。</div>
+        </div>
+      </div>
+
+      <!-- 安全 -->
+      <div class="g-panel" data-panel="security" style="display:none">
+        <div class="g-field">
+          <label class="g-label">固定访问密码</label>
+          <input id="fixedPwdInput" class="g-input" type="text" placeholder="留空则不预置密码">
+          <div class="g-desc">填入后所有安装此定制包的客户端使用统一访问密码。</div>
+        </div>
+        <div class="g-field">
+          <label class="g-label">连接选项</label>
+          <label class="g-checkline"><input type="checkbox" id="allowTempPwdChk"> 允许使用临时密码连接（控制端显示临时密码输入框）</label>
+          <label class="g-checkline"><input type="checkbox" id="hideCmChk"> 隐藏连接成功后的浮动管理窗（CM）</label>
+        </div>
+      </div>
+
+      <!-- 其他 -->
+      <div class="g-panel" data-panel="other" style="display:none">
+        <div class="g-field">
+          <div class="g-notice">以下安全策略将被内嵌进客户端：隐藏网络设置、隐藏服务器设置、禁止解锁 PIN、屏蔽官方更新。安装后无法在客户端内修改这些服务器配置。</div>
+        </div>
+      </div>
+
+      <div class="g-submit-bar">
+        <button id="submitBtn" class="g-btn g-btn-primary">▶ 提交并生成客户端</button>
+      </div>
+    </div>
+
+    <!-- 构建进度 -->
+    <div class="g-card" id="buildCard" style="display:none">
+      <h2>云端生成进度</h2>
+      <div class="g-progress-head">
+        <span id="buildStep">准备中...</span>
+        <span id="buildPct">0%</span>
+      </div>
+      <div class="g-bar"><div class="g-bar-fill" id="buildFill"></div></div>
+      <div id="buildNote" class="g-desc g-build-note"></div>
+      <div id="downloading" class="g-downloading" style="display:none">
+        <span class="g-spinner"></span> 正在下载安装包，完成后将自动返回兑换页…
+      </div>
+    </div>
+  </section>
+
+  <!-- 视图3：完成/错误 -->
+  <section id="viewDone" class="g-wrap" style="display:none">
+    <div class="g-card g-center">
+      <div class="g-done-icon">✓</div>
+      <h2 id="doneTitle">下载完成</h2>
+      <p id="doneMsg" class="g-hint">本次兑换码已核销，页面即将返回兑换入口。</p>
+      <button id="againBtn" class="g-btn g-btn-primary">返回兑换入口</button>
+    </div>
+  </section>
+</div>
+<script src="/guest.js?v=20261116a"></script>
+</body>
+</html>

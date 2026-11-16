@@ -63,10 +63,11 @@ function safeEqual(a, b) {
 }
 
 // 登录页自身需要的资源放行
-const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login']);
+const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login', '/guest.html', '/guest.js', '/guest.css']);
 
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();
+  if (req.path.startsWith('/api/guest/')) return next();
   if (currentUser(req)) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: '未登录或会话已过期' });
   return res.redirect('/login.html');
@@ -1737,6 +1738,199 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+
+
+// ============================================================
+// 2026-11-16 新增：游客 CDK 定制客户端（独立数据库 + 公开 API）
+// 游客凭 CDK 兑换一次性会话 → 填自己的服务端配置 → 复用云端编译
+// → 下载完成后自动核销 CDK → 刷新回兑换页，可用新 CDK 再次进入。
+// 编译链路仍是全局串行 + 每次强制重写 CUSTOM_CONFIG，配置天然隔离。
+// ============================================================
+const CDK_DB = process.env.CDK_DB || path.join(__dirname, 'cdk.sqlite3');
+function cdkQ(v) { return "'" + String(v == null ? '' : v).replace(/'/g, "''") + "'"; }
+function cdkRun(sql) {
+  try { return execFileSync(SQLITE3_BIN, [CDK_DB, sql], { timeout: 15000, encoding: 'utf8' }); }
+  catch (e) { console.warn('[CDK] exec fail:', e.message); return ''; }
+}
+function cdkRows(sql) {
+  try {
+    const out = execFileSync(SQLITE3_BIN, [CDK_DB, '-json', sql], { timeout: 15000, encoding: 'utf8' }).toString();
+    const a = JSON.parse(out || '[]'); return Array.isArray(a) ? a : [];
+  } catch (e) { console.warn('[CDK] query fail:', e.message); return []; }
+}
+function initCdkDb() {
+  cdkRun(`CREATE TABLE IF NOT EXISTS cdk (
+    code TEXT PRIMARY KEY,
+    note TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'unused',
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    used_at INTEGER,
+    used_ip TEXT DEFAULT '',
+    active_token TEXT DEFAULT '',
+    job_id TEXT DEFAULT ''
+  )`);
+  cdkRun(`CREATE TABLE IF NOT EXISTS cdk_session (
+    token TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`);
+  cdkRun(`CREATE INDEX IF NOT EXISTS idx_cdk_session_code ON cdk_session(code)`);
+  console.log('[CDK] database ready at', CDK_DB);
+}
+initCdkDb();
+
+const CDK_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function genCdkCode() {
+  let s = '';
+  const b = crypto.randomBytes(16);
+  for (let i = 0; i < 16; i++) {
+    if (i === 4 || i === 8 || i === 12) s += '-';
+    s += CDK_ALPHABET[b[i] % CDK_ALPHABET.length];
+  }
+  return 'RD-' + s;
+}
+function cdkGuestAuth(req, res, next) {
+  const token = String((req.query && req.query.token) || (req.body && req.body.token) || '').trim();
+  const sess = cdkRows(`SELECT * FROM cdk_session WHERE token=${cdkQ(token)}`)[0];
+  if (!sess || !sess.expires_at || sess.expires_at < Date.now())
+    return res.status(401).json({ error: '会话已失效，请重新输入 CDK' });
+  req.cdkGuest = sess;
+  next();
+}
+
+// ---- 游客：兑换 CDK ----
+app.post('/api/guest/redeem', (req, res) => {
+  const code = String((req.body || {}).code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: '请输入 CDK' });
+  const row = cdkRows(`SELECT * FROM cdk WHERE code=${cdkQ(code)}`)[0];
+  if (!row) return res.status(400).json({ error: 'CDK 不存在，请检查后重试' });
+  if (row.status === 'disabled') return res.status(400).json({ error: '该 CDK 已被禁用' });
+  if (row.expires_at && row.expires_at < Date.now()) return res.status(400).json({ error: '该 CDK 已过期' });
+  if (Number(row.used_count) >= Number(row.max_uses)) return res.status(400).json({ error: '该 CDK 已使用完毕' });
+  if (row.active_token) {
+    const act = cdkRows(`SELECT * FROM cdk_session WHERE token=${cdkQ(row.active_token)}`)[0];
+    if (act && act.expires_at > Date.now())
+      return res.status(409).json({ error: '该 CDK 正在使用中，请等本次构建完成并下载后再用新 CDK 进入' });
+  }
+  const token = crypto.randomBytes(24).toString('hex');
+  const now = Date.now(), exp = now + 12 * 3600 * 1000;
+  cdkRun(`INSERT OR REPLACE INTO cdk_session(token,code,created_at,expires_at) VALUES(${cdkQ(token)},${cdkQ(code)},${now},${exp})`);
+  cdkRun(`UPDATE cdk SET status='active', active_token=${cdkQ(token)}, used_ip=${cdkQ(req.ip || '')} WHERE code=${cdkQ(code)}`);
+  res.json({ ok: true, token, code, expiresAt: exp });
+});
+
+// ---- 游客：提交构建（强制 keepConfig=false，写自己的配置）----
+app.post('/api/guest/build', cdkGuestAuth, async (req, res) => {
+  const body = req.body || {};
+  const brand = cleanBrand(body.brand);
+  if (!brand) return res.status(400).json({ error: '请填写品牌名' });
+  if (!/^[\p{L}\p{N}_][\p{L}\p{N}_-]*$/u.test(brand))
+    return res.status(400).json({ error: '品牌名只能使用中英文、数字、-、_，且不能以 - 开头' });
+  if (!String(body.host || '').trim()) return res.status(400).json({ error: '请填写 ID 服务器地址' });
+  try { githubConfig(); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const running = [...buildJobs.values()].find(j => j.status === 'running' || j.status === 'queued');
+  if (running) return res.status(409).json({ error: '已有构建任务正在进行，请等完成后再提交' });
+  const id = 'g' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+  const job = {
+    id, status: 'queued', progress: 0, step: '已加入构建队列',
+    createdAt: Date.now(), updatedAt: Date.now(),
+    cdkCode: req.cdkGuest.code, cdkToken: req.cdkGuest.token,
+    opts: {
+      brand,
+      os: body.os === 'ios' ? 'ios' : (body.os === 'android' ? 'android' : 'windows'),
+      all: body.all === true || body.all === 'true' || body.all === 'Y',
+      both: false,
+      lang: 'zh', conn: 'agent', style: 'portable',
+      prompt: String(body.prompt || '').slice(0, 100),
+      host: String(body.host || '').trim(),
+      relay: String(body.relay || '').trim(),
+      apiServer: String(body.apiServer || '').trim(),
+      key: String(body.key || '').trim(),
+      fixedPassword: String(body.fixedPassword || '').trim(),
+      allowTempPassword: body.allowTempPassword === true || body.allowTempPassword === 'true' || body.allowTempPassword === 'Y',
+      hideCm: body.hideCm === true || body.hideCm === 'true' || body.hideCm === 'Y',
+      keepConfig: false,
+    },
+  };
+  buildJobs.set(id, job);
+  runCloudBuild(job);
+  res.json({ ok: true, id, job: publicJob(job) });
+});
+
+// ---- 游客：查询自己 CDK 对应的构建进度 ----
+app.get('/api/guest/status', cdkGuestAuth, (req, res) => {
+  const id = String(req.query.id || '');
+  const job = buildJobs.get(id);
+  if (!job || job.cdkCode !== req.cdkGuest.code) return res.status(404).json({ error: '构建任务不存在' });
+  const p = publicJob(job);
+  p.downloadUrl = job.status === 'success' && job.file
+    ? `/api/guest/download?token=${encodeURIComponent(req.cdkGuest.token)}&id=${encodeURIComponent(id)}` : null;
+  res.json(p);
+});
+
+// ---- 游客：下载（下载完成后核销 CDK）----
+app.get('/api/guest/download', cdkGuestAuth, (req, res) => {
+  const id = String(req.query.id || '');
+  const job = buildJobs.get(id);
+  if (!job || job.cdkCode !== req.cdkGuest.code) return res.status(404).json({ error: '构建任务不存在' });
+  if (job.status !== 'success' || !job.file || !fs.existsSync(job.file))
+    return res.status(404).json({ error: '安装包不存在或已被下载' });
+  const filePath = job.file, fileName = job.fileName || path.basename(filePath);
+  const code = req.cdkGuest.code, token = req.cdkGuest.token;
+  res.download(filePath, fileName, (err) => {
+    if (err) { console.warn('[CDK] download aborted:', err.message); return; }
+    try { fs.unlinkSync(filePath); } catch (e) {}
+    try { fs.rmSync(path.join(BUILD_DIR, id), { recursive: true, force: true }); } catch (e) {}
+    const now = Date.now();
+    cdkRun(`UPDATE cdk SET used_count=used_count+1, used_at=${now}, job_id=${cdkQ(id)}, active_token='', used_ip=${cdkQ(req.ip || '')} WHERE code=${cdkQ(code)}`);
+    cdkRun(`DELETE FROM cdk_session WHERE token=${cdkQ(token)}`);
+    const row = cdkRows(`SELECT used_count,max_uses FROM cdk WHERE code=${cdkQ(code)}`)[0];
+    const remain = row ? (Number(row.max_uses) - Number(row.used_count)) : 0;
+    cdkRun(`UPDATE cdk SET status=${cdkQ(remain > 0 ? 'unused' : 'used')} WHERE code=${cdkQ(code)}`);
+    job.downloaded = true; job.file = null; job.step = '已下载，CDK 已核销';
+    console.log(`[CDK ${code}] redeemed by download job ${id}, remain=${remain}`);
+  });
+});
+
+// ---- 管理员：CDK 管理（走现有 session 鉴权）----
+app.get('/api/cdk/list', (req, res) => {
+  res.json({ ok: true, list: cdkRows('SELECT * FROM cdk ORDER BY created_at DESC') });
+});
+app.post('/api/cdk/create', (req, res) => {
+  const b = req.body || {};
+  const count = Math.max(1, Math.min(100, parseInt(b.count, 10) || 1));
+  const note = String(b.note || '').slice(0, 100);
+  const maxUses = Math.max(1, Math.min(10, parseInt(b.maxUses, 10) || 1));
+  const days = Math.max(0, parseInt(b.expiresDays, 10) || 0);
+  const exp = days > 0 ? Date.now() + days * 86400000 : 0;
+  const now = Date.now(), list = [];
+  for (let i = 0; i < count; i++) {
+    const code = genCdkCode();
+    cdkRun(`INSERT OR REPLACE INTO cdk(code,note,status,max_uses,used_count,expires_at,created_at) VALUES(${cdkQ(code)},${cdkQ(note)},'unused',${maxUses},0,${exp},${now + i})`);
+    list.push(code);
+  }
+  console.log(`[CDK] created ${count} codes, note=${note}`);
+  res.json({ ok: true, list });
+});
+app.post('/api/cdk/status', (req, res) => {
+  const b = req.body || {};
+  const code = String(b.code || '').trim().toUpperCase();
+  const status = String(b.status || '');
+  if (['unused', 'used', 'disabled'].indexOf(status) < 0) return res.status(400).json({ error: '无效状态' });
+  cdkRun(`UPDATE cdk SET status=${cdkQ(status)}, active_token='' WHERE code=${cdkQ(code)}`);
+  res.json({ ok: true });
+});
+app.post('/api/cdk/delete', (req, res) => {
+  const code = String((req.body || {}).code || '').trim().toUpperCase();
+  cdkRun(`DELETE FROM cdk WHERE code=${cdkQ(code)}`);
+  cdkRun(`DELETE FROM cdk_session WHERE code=${cdkQ(code)}`);
+  res.json({ ok: true });
+});
+
 
 // ---------- 启动 ----------
 restoreBuilds();

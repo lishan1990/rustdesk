@@ -20,6 +20,7 @@ const PAGES = {
   'client-gen':{ group: '客户端定制', title: '定制客户端', render: renderClientGen,   crumb: ['客户端定制', '定制客户端'] },
   'build-env': { group: '客户端定制', title: '构建环境配置', render: renderBuildEnv,  crumb: ['客户端定制', '构建环境配置'] },
   'build-history':{ group: '客户端定制', title: '构建历史', render: renderBuildHistory, crumb: ['客户端定制', '构建历史'] },
+  'cdk-manage':{ group: '客户端定制', title: 'CDK 管理', render: renderCdkManage, crumb: ['客户端定制', 'CDK 管理'] },
 };
 
 let currentPage = 'overview';
@@ -1907,3 +1908,142 @@ document.addEventListener('DOMContentLoaded', () => {
 
   gotoPage('overview');
 });
+
+
+// ============================================================
+// CDK 管理（游客兑换码）
+// ============================================================
+const CDK_STATUS_LABEL = { unused: '未使用', active: '使用中', used: '已核销', disabled: '已禁用' };
+const CDK_STATUS_TYPE  = { unused: 'muted', active: 'warn', used: 'ok', disabled: 'err' };
+
+async function renderCdkManage() {
+  loading();
+  let data = {};
+  try { data = await api('/api/cdk/list'); } catch (e) {
+    $('#content').innerHTML = '';
+    $('#content').appendChild(errorBox(e));
+    return;
+  }
+  const items = data.list || [];
+  const guestUrl = location.origin + '/guest.html';
+  const usedCount = items.filter(x => x.status === 'used').length;
+  const unusedCount = items.filter(x => x.status === 'unused').length;
+  const activeCount = items.filter(x => x.status === 'active').length;
+
+  $('#content').innerHTML = '';
+  $('#content').appendChild(h('div', {}, [
+    pageHead('CDK 管理', '生成一次性兑换码，游客凭 CDK 进入定制页填写自己的服务器配置并生成客户端；下载完成后该 CDK 自动核销。'),
+
+    // 游客入口提示
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-body' }, [
+        h('div', { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap' }, [
+          h('span', { class: 'text-bold' }, '游客入口地址：'),
+          h('a', { class: 'mono-sm', href: guestUrl, target: '_blank' }, guestUrl),
+          h('button', { class: 'btn btn-secondary', onclick: () => copyText(guestUrl, '入口地址已复制') }, '复制地址'),
+          h('a', { class: 'btn btn-primary', href: guestUrl, target: '_blank' }, '打开游客页'),
+        ]),
+        h('div', { class: 'text-muted text-sm', style: 'margin-top:8px' },
+          '把此地址连同 CDK 一起发给客户。客户无需登录管理后台。'),
+      ]),
+    ]),
+
+    // 统计
+    h('div', { class: 'stat-cards' }, [
+      statCard('全部 CDK', items.length),
+      statCard('可用（未使用）', unusedCount),
+      statCard('使用中', activeCount),
+      statCard('已核销', usedCount),
+    ]),
+
+    // 生成表单
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-head' }, [h('span', { class: 'card-title' }, '批量生成 CDK')]),
+      h('div', { class: 'card-body' }, [
+        h('div', { class: 'form-row' }, [
+          field('生成数量', h('input', { class: 'form-input', type: 'number', id: 'cdkCount', value: '5', min: '1', max: '100' })),
+          field('每码可用次数', h('input', { class: 'form-input', type: 'number', id: 'cdkUses', value: '1', min: '1', max: '10' })),
+          field('有效期（天，0=永久）', h('input', { class: 'form-input', type: 'number', id: 'cdkDays', value: '0', min: '0' })),
+          field('备注', h('input', { class: 'form-input', type: 'text', id: 'cdkNote', placeholder: '例：客户A-10月' })),
+        ]),
+        h('button', { class: 'btn btn-primary', onclick: createCdk }, '生成 CDK'),
+        h('div', { id: 'cdkResult', class: 'text-sm', style: 'margin-top:12px;white-space:pre-wrap' }),
+      ]),
+    ]),
+
+    // 列表
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-head' }, [h('span', { class: 'card-title' }, 'CDK 列表')]),
+      h('div', { class: 'card-body' }, items.length === 0
+        ? empty('还没有 CDK，先在上方生成')
+        : h('table', {}, [
+            h('thead', {}, [h('tr', {}, [
+              h('th', {}, '兑换码'), h('th', {}, '备注'), h('th', {}, '状态'),
+              h('th', {}, '已用/次数'), h('th', {}, '有效期至'), h('th', {}, '使用时间'),
+              h('th', {}, '操作'),
+            ])]),
+            h('tbody', {}, items.map(it => h('tr', {}, [
+              h('td', {}, h('span', { class: 'mono-sm', style: 'cursor:pointer', title: '点击复制', onclick: () => copyText(it.code, '已复制 ' + it.code) }, it.code)),
+              h('td', {}, it.note || '—'),
+              h('td', {}, badge(CDK_STATUS_LABEL[it.status] || it.status, CDK_STATUS_TYPE[it.status] || 'muted')),
+              h('td', {}, (it.used_count || 0) + ' / ' + (it.max_uses || 1)),
+              h('td', {}, it.expires_at ? h('span', { class: 'mono-sm' }, fmtDT(it.expires_at)) : '永久'),
+              h('td', {}, it.used_at ? h('span', { class: 'mono-sm' }, fmtDT(it.used_at)) : '—'),
+              h('td', {}, h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+                h('button', { class: 'btn-link', onclick: () => copyText(it.code, '已复制 ' + it.code) }, '复制'),
+                it.status === 'unused'
+                  ? h('button', { class: 'btn-link danger', onclick: () => setCdkStatus(it.code, 'disabled') }, '禁用')
+                  : (it.status === 'disabled'
+                    ? h('button', { class: 'btn-link ok', onclick: () => setCdkStatus(it.code, 'unused') }, '恢复')
+                    : null),
+                h('button', { class: 'btn-link danger', onclick: () => delCdk(it.code) }, '删除'),
+              ])),
+            ]))),
+          ])
+      ),
+    ]),
+  ]));
+}
+
+function statCard(label, value) {
+  return h('div', { class: 'stat-card' }, [
+    h('div', { class: 'stat-card-label' }, label),
+    h('div', { class: 'stat-card-value' }, String(value)),
+  ]);
+}
+function field(label, input) {
+  return h('div', { class: 'form-group' }, [h('div', { class: 'form-label' }, label), input]);
+}
+function copyText(text, msg) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(msg || '已复制'));
+    else {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove(); toast(msg || '已复制');
+    }
+  } catch (e) { toast('复制失败，请手动选择', 'err'); }
+}
+async function createCdk() {
+  const count = parseInt($('#cdkCount').value, 10) || 1;
+  const maxUses = parseInt($('#cdkUses').value, 10) || 1;
+  const expiresDays = parseInt($('#cdkDays').value, 10) || 0;
+  const note = $('#cdkNote').value.trim();
+  const box = $('#cdkResult');
+  box.textContent = '生成中…';
+  try {
+    const d = await postJson('/api/cdk/create', { count, maxUses, expiresDays, note });
+    box.textContent = '已生成 ' + d.list.length + ' 个 CDK：\n' + d.list.join('\n');
+    toast('已生成 ' + d.list.length + ' 个 CDK');
+    gotoPage('cdk-manage');
+  } catch (e) { box.textContent = '生成失败：' + e.message; toast(e.message, 'err'); }
+}
+async function setCdkStatus(code, status) {
+  if (!confirm('确定要' + (status === 'disabled' ? '禁用' : '恢复') + '该 CDK 吗？')) return;
+  try { await postJson('/api/cdk/status', { code, status }); toast('操作成功'); gotoPage('cdk-manage'); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function delCdk(code) {
+  if (!confirm('确定删除该 CDK？删除后不可恢复。')) return;
+  try { await postJson('/api/cdk/delete', { code }); toast('已删除'); gotoPage('cdk-manage'); }
+  catch (e) { toast(e.message, 'err'); }
+}

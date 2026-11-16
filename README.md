@@ -116,3 +116,24 @@ GitHub 在 dispatch 阶段直接拒绝，check-run annotation 为
 - 静态资源版本号刷新为 `v=20261114a`，避免浏览器缓存旧样式。
 - 服务器备份：`app.js.bak.20261114-layout` / `styles.css.bak.20261114-layout` /
   `index.html.bak.20261114-layout`。
+
+
+## 2026-11-16 游客 CDK 定制客户端系统
+
+将「定制客户端」扩展为面向游客的自助服务：游客凭一次性 CDK 进入，填自己的服务端配置与品牌信息，
+云端生成专属客户端并自动下载，下载完成后 CDK 自动核销、页面刷新回兑换入口，可用新 CDK 再次进入。
+
+**新增文件**：`public/guest.html` / `guest.js` / `guest.css`（免登录游客页）。
+**后端**（server.js）：
+- 新增独立 CDK 库 `cdk.sqlite3`（表 cdk / cdk_session，运行期自动建表；已加入 .gitignore 不入库）。
+- 公开 API：`POST /api/guest/redeem`（兑换，签发 12h 会话 token，防重复兑换）、
+  `POST /api/guest/build`（复用 runCloudBuild，强制 keepConfig=false 写自己的 CUSTOM_CONFIG）、
+  `GET /api/guest/status`、`GET /api/guest/download`（下载完成回调核销 CDK + 失效会话）。
+- 管理 API：`/api/cdk/list`、`/api/cdk/create`、`/api/cdk/status`、`/api/cdk/delete`（走管理员 session）。
+- 认证中间件放行 guest.html/js/css 与 `/api/guest/*`。
+**管理后台**：侧边栏新增「CDK 管理」页，支持批量生成（数量/次数/有效期/备注）、复制、禁用/恢复、删除，并显示游客入口地址。
+**安全**：编译仍全局串行，每次构建强制重写 CUSTOM_CONFIG，游客与管理配置不串台；CDK 有效期/次数/
+状态校验齐全；token 绑定 CDK，下载严格校验归属。注意：管理员若使用「沿用云端配置」重编，会沿用
+上一次 CUSTOM_CONFIG（可能是游客的），此时应改回普通构建重写自己的配置。
+
+**测试**：兑换/重复兑换拒绝/鉴权/状态隔离/管理 CRUD/静态资源全部通过；server.js 与 app.js 均 `node --check` 通过。
