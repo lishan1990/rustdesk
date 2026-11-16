@@ -78,6 +78,22 @@
           <label class="g-checkline"><input type="checkbox" id="buildAll"> 同时构建三系统安装包（Windows + Android + iOS，耗时约为单系统三倍）</label>
           <div class="g-desc">iOS 未配置苹果签名时产出未签名 .ipa，需自行重签后安装。</div>
         </div>
+        <div class="g-field">
+          <label class="g-label">连接类型</label>
+          <div class="g-radios">
+            <label class="g-radio"><input type="radio" name="conn" value="agent" checked> 被控专用（只接收连接）</label>
+            <label class="g-radio"><input type="radio" name="conn" value="dual"> 双向（完整版标准界面）</label>
+          </div>
+          <div class="g-desc">被控专用：只能被别人连接；双向：完整功能，也可主动连接其他设备。</div>
+        </div>
+        <div class="g-field">
+          <label class="g-label">款式</label>
+          <div class="g-radios">
+            <label class="g-radio"><input type="radio" name="style" value="portable" checked> 便携版（复制ID和密码）</label>
+            <label class="g-radio"><input type="radio" name="style" value="unattended"> 无人值守版（安装按钮）</label>
+            <label class="g-radio"><input type="radio" name="style" value="standard"> 官方标准版（官方界面）</label>
+          </div>
+        </div>
       </div>
 
       <!-- 服务器 -->

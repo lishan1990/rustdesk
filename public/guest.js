@@ -102,6 +102,8 @@
       brand: val('brandInput'),
       lang: radio('lang') || 'zh',
       os: radio('os') || 'windows',
+      conn: radio('conn') || 'agent',
+      style: radio('style') || 'portable',
       all: checked('buildAll'),
       prompt: val('tipInput'),
       host: val('idServerInput'),
