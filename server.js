@@ -1031,6 +1031,7 @@ function recordBuildHistory(job) {
     successAt: Date.now(),
     fileName: job.fileName,
     size: job.size || 0,
+    cdkCode: job.cdkCode || null,
   });
 }
 
@@ -1061,6 +1062,11 @@ function restoreBuilds() {
         updatedAt: Date.now(),
         downloaded: false,
       });
+      // 回填 CDK 绑定（恢复/遗留产物跨重启后游客仍可继续下载）
+      try {
+        const crow = cdkRows(`SELECT code FROM cdk WHERE job_id=${cdkQ(dir)} LIMIT 1`)[0];
+        if (crow) buildJobs.get(dir).cdkCode = crow.code;
+      } catch (e2) {}
       console.log('[BUILD] restore leftover artifact:', dir, f);
       // 历史里没有这条记录时补登（旧产物没有保存定制参数，未知项留空）
       if (!readBuildHistory().some(e => e.id === dir)) {
@@ -1821,7 +1827,10 @@ app.post('/api/build/recover', async (req, res) => {
       job = { id: String(b.jobId || ('rec-' + runId)), createdAt: Date.now(), updatedAt: Date.now(), opts: { brand: String(b.brand || '逍遥远控') } };
       buildJobs.set(job.id, job);
     }
-    if (b.cdk) job.cdkCode = String(b.cdk).trim().toUpperCase();
+    if (b.cdk) {
+      job.cdkCode = String(b.cdk).trim().toUpperCase();
+      try { cdkRun(`UPDATE cdk SET job_id=${cdkQ(job.id)} WHERE code=${cdkQ(job.cdkCode)}`); } catch (e) {}
+    }
     if (job.status === 'success') return res.json({ ok: true, id: job.id, job: publicJob(job), hint: '已是成功状态' });
     const brand = cleanBrand((job.opts && job.opts.brand) || '逍遥远控') || 'RustDesk';
     const workDir = path.join(BUILD_DIR, job.id);
