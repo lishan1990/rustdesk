@@ -1485,6 +1485,21 @@ async function runCloudBuild(job) {
     job.error = e.message || String(e);
     job.step = '构建失败：' + job.error;
     console.warn(`[BUILD ${job.id}] failed:`, job.error);
+    // 构建失败通知（仅游客任务）
+    if (job.cdkCode) {
+      const o = job.opts || {};
+      const osLabel = o.all ? 'Windows+Android+iOS' : ({ windows: 'Windows', android: 'Android', ios: 'iOS' }[o.os] || o.os || '');
+      const fmtT2 = (ts) => { const d = new Date(ts + 8 * 3600 * 1000); return d.toISOString().replace('T', ' ').slice(0, 19); };
+      notifyWecom(
+        '【逍遥远控】定制客户端构建失败\n' +
+        'CDK：' + job.cdkCode + '\n' +
+        '品牌名：' + (o.brand || '-') + '\n' +
+        '系统：' + osLabel + '\n' +
+        '服务端：' + (o.host || '-') + '\n' +
+        '失败原因：' + (job.error || '-').slice(0, 200) + '\n' +
+        '时间：' + fmtT2(Date.now())
+      );
+    }
   }
 }
 
