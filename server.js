@@ -1881,6 +1881,7 @@ function aibotConnect() {
       const cid = b.chatid || (b.from && b.from.userid) || '';
       saveAibotChat(cid, chatType);
       console.log('[notify] aibot 收到回调 ' + cmd + ': ' + JSON.stringify(b).slice(0, 300));
+      if (cmd === 'aibot_msg_callback') aibotHandleText(b);
     }
   });
   ws.on('error', (e) => console.warn('[notify] aibot 连接错误:', e.message));
@@ -1948,6 +1949,42 @@ function genCdkCode() {
     s += CDK_ALPHABET[b[i] % CDK_ALPHABET.length];
   }
   return 'RD-' + s;
+}
+
+// ---- 智能机器人指令：生成CDK（仅限管理员 userid）----
+function aibotHandleText(b) {
+  try {
+    if (!b || b.msgtype !== 'text') return;
+    const cfg = loadNotifyCfg();
+    const admins = (cfg.aibot && Array.isArray(cfg.aibot.adminUserids) && cfg.aibot.adminUserids.length)
+      ? cfg.aibot.adminUserids : ['LiShanShan'];
+    const uid = b.from && b.from.userid;
+    if (!uid || admins.indexOf(uid) < 0) return;
+    let text = String((b.text && b.text.content) || '').trim();
+    text = text.replace(/@[\u4e00-\u9fa5A-Za-z0-9_-]+\s*/g, ' ').trim();
+    const m = text.match(/^生成\s*cdk\s*(\d{1,2})?$/i);
+    if (!m) return;
+    const count = Math.max(1, Math.min(20, parseInt(m[1], 10) || 1));
+    const now = Date.now(), codes = [];
+    for (let i = 0; i < count; i++) {
+      const code = genCdkCode();
+      cdkRun(`INSERT OR REPLACE INTO cdk(code,note,status,max_uses,used_count,expires_at,created_at) VALUES(${cdkQ(code)},${cdkQ('机器人创建')},'unused',1,0,0,${now + i})`);
+      codes.push(code);
+    }
+    console.log('[notify] aibot 生成 ' + codes.length + ' 个CDK by ' + uid);
+    const cid = b.chatid || uid;
+    const ctype = b.chattype === 'single' ? 1 : 2;
+    aibotSend({ cmd: 'aibot_send_msg', body: {
+      chatid: cid,
+      chat_type: ctype,
+      msgtype: 'markdown',
+      markdown: {
+        content: '**已生成 ' + codes.length + ' 个新 CDK**\n' +
+          codes.map((c) => '`' + c + '`').join('\n') +
+          '\n\n兑换入口：http://182.44.6.48:21120/guest.html\n提示：发送「生成CDK 5」可一次生成 5 个'
+      },
+    } });
+  } catch (e) { console.warn('[notify] aibot 指令处理失败:', e.message); }
 }
 function cdkGuestAuth(req, res, next) {
   const token = String((req.query && req.query.token) || (req.body && req.body.token) || '').trim();
