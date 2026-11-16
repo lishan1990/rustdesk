@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>复制兑换码</title>
+<style>
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#f2f4f7;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#fff;border-radius:16px;padding:32px 24px;max-width:360px;width:88%;box-shadow:0 4px 24px rgba(0,0,0,.08);text-align:center}
+h1{font-size:16px;color:#666;margin:0 0 16px;font-weight:500}
+.code{font-family:Consolas,monospace;font-size:22px;font-weight:700;color:#1a73e8;letter-spacing:1px;word-break:break-all;background:#f0f5ff;border-radius:10px;padding:16px 12px;margin-bottom:20px;user-select:all;-webkit-user-select:all}
+button{width:100%;padding:14px 0;font-size:17px;font-weight:600;color:#fff;background:#1a73e8;border:none;border-radius:12px;cursor:pointer}
+button:active{background:#1557b0}
+button[disabled]{background:#bbb}
+.tip{font-size:13px;color:#999;margin-top:14px;line-height:1.6}
+.ok{color:#0a7d43;font-weight:600}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>兑换码（CDK）</h1>
+  <div class="code" id="code">…</div>
+  <button id="btn">📋 点击复制</button>
+  <div class="tip" id="tip">点击按钮复制后，返回聊天粘贴即可</div>
+</div>
+<script>
+function getCode(){var p=new URLSearchParams(location.search);return (p.get('code')||p.get('cdk')||'').trim();}
+var code=getCode();
+document.getElementById('code').textContent=code||'未指定兑换码';
+var btn=document.getElementById('btn'),tip=document.getElementById('tip');
+if(!code){btn.disabled=true;tip.textContent='链接缺少 code 参数';}
+function legacyCopy(){
+  try{
+    var ta=document.createElement('textarea');ta.value=code;
+    ta.style.position='fixed';ta.style.opacity='0';ta.style.left='-9999px';
+    document.body.appendChild(ta);ta.focus();ta.select();
+    var ok=document.execCommand('copy');document.body.removeChild(ta);
+    return !!ok;
+  }catch(e){return false;}
+}
+function doCopy(auto){
+  if(!code)return;
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(code).then(function(){done(true);}).catch(function(){done(legacyCopy());});
+  }else{
+    done(legacyCopy());
+  }
+  function done(good){
+    if(good){
+      btn.textContent=auto?'📋 再次复制':'✅ 已复制';
+      tip.innerHTML='<span class="ok">已复制 '+code+'</span>，返回聊天粘贴即可';
+    }else{
+      tip.innerHTML='自动复制失败，请<b>长按上方兑换码</b>手动复制';
+    }
+  }
+}
+btn.addEventListener('click',function(){doCopy(false);});
+if(code)window.addEventListener('load',function(){setTimeout(function(){doCopy(true);},120);});
+</script>
+</body>
+</html>

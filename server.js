@@ -63,7 +63,7 @@ function safeEqual(a, b) {
 }
 
 // 登录页自身需要的资源放行
-const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login', '/guest.html', '/guest.js', '/guest.css', '/api/build/direct']);
+const PUBLIC_PATHS = new Set(['/login.html', '/logo.png', '/favicon.ico', '/api/auth/login', '/guest.html', '/guest.js', '/guest.css', '/api/build/direct', '/copy.html']);
 
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();
@@ -2137,8 +2137,9 @@ function aibotHandleText(b) {
         codes.push(code);
       }
       console.log('[notify] aibot 生成 ' + codes.length + ' 个CDK by ' + uid);
+      const pubGen = notifyPublicUrl();
       aibotReply(b, '**已生成 ' + codes.length + ' 个新 CDK**\n' +
-        codes.map((c) => '`' + c + '`').join('\n') +
+        codes.map((c) => '`' + c + '`' + ' [📋复制](' + pubGen + '/copy.html?code=' + encodeURIComponent(c) + ')').join('\n') +
         '\n\n兑换入口：http://182.44.6.48:21120/guest.html\n提示：发送「列出CDK」查看可用列表，发送「生成CDK 5」一次生成 5 个');
       return;
     }
@@ -2155,7 +2156,7 @@ function aibotHandleText(b) {
         lines.push('**可用 CDK（前 ' + Math.min(15, avail.length) + ' 个）**');
         for (const r of avail.slice(0, 15)) {
           const exp = r.expires_at ? new Date(r.expires_at + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 10) + ' 到期' : '永久有效';
-          lines.push('`' + r.code + '`' + (r.note ? '（' + r.note + '）' : '') + ' ' + exp);
+          lines.push('`' + r.code + '`' + (r.note ? '（' + r.note + '）' : '') + ' ' + exp + ' [📋复制](' + notifyPublicUrl() + '/copy.html?code=' + encodeURIComponent(r.code) + ')');
         }
         if (avail.length > 15) lines.push('…还有 ' + (avail.length - 15) + ' 个，请到管理面板「CDK 管理」查看');
         lines.push('');
