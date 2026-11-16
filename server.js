@@ -1300,7 +1300,7 @@ function describeRun(jobs, startedAt) {
 
 async function waitForRun(cfg, since, job) {
   for (let i = 0; i < 60; i++) {
-    const data = await ghJson('GET',
+    const data = await ghJsonSteady('GET',
       `/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${cfg.workflow}/runs?branch=${encodeURIComponent(cfg.branch)}&per_page=10`);
     const run = (data.workflow_runs || []).find(r => new Date(r.created_at).getTime() >= since - 30000);
     if (run) {
@@ -1314,10 +1314,26 @@ async function waitForRun(cfg, since, job) {
   throw new Error('未能在 GitHub Actions 找到构建任务（请确认工作流与分支已推送）');
 }
 
+// GitHub API 暂时性错误重试（502/超时等只读接口用，避免一次抖动导致整个构建误判失败）
+async function ghJsonSteady(method, urlPath, body, opts) {
+  let lastErr = null;
+  for (let a = 0; a < 6; a++) {
+    try { return await ghJson(method, urlPath, body, opts); }
+    catch (e) {
+      const msg = String((e && e.message) || e);
+      if (!/GitHub API 5\d\d|GitHub API 429|请求超时|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up/i.test(msg)) throw e;
+      lastErr = e;
+      console.warn('[BUILD] GitHub API 暂时性错误（第 ' + (a + 1) + ' 次遇到）: ' + msg + '，15s 后重试');
+      await sleepMs(15000);
+    }
+  }
+  throw lastErr;
+}
+
 async function pollRun(cfg, runId, job) {
   const startedAt = Date.now();
   for (let i = 0; i < 900; i++) {
-    const run = await ghJson('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}`);
+    const run = await ghJsonSteady('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}`);
     if (run.status === 'completed') {
       if (run.conclusion !== 'success') {
         if (run.conclusion === 'cancelled') {
@@ -1327,7 +1343,7 @@ async function pollRun(cfg, runId, job) {
       }
       return true;
     }
-    const jobsData = await ghJson('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/jobs?per_page=100`);
+    const jobsData = await ghJsonSteady('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/jobs?per_page=100`);
     const jobs = jobsData.jobs || [];
     setJob(job, estimateProgress(jobs), describeRun(jobs, startedAt));
     await sleepMs(20000);
@@ -1361,7 +1377,7 @@ async function downloadArtifactZip(cfg, artId, dest) {
 }
 
 async function fetchArtifacts(cfg, runId, targets, workDir, brand) {
-  const data = await ghJson('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/artifacts`);
+  const data = await ghJsonSteady('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/artifacts`);
   const arts = data.artifacts || [];
   const wanted = [];
   if (targets.includes('windows')) wanted.push('rd-client-windows-x64');
@@ -1788,6 +1804,66 @@ app.get('/api/build/download', (req, res) => {
     }
     console.log(`[BUILD ${id}] downloaded and removed`);
   });
+});
+
+// ---- 管理员：恢复云端已成功但本地面板误判失败的构建（直接拉回产物，无需重跑）----
+app.post('/api/build/recover', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const runId = parseInt(b.runId, 10);
+    if (!runId) return res.status(400).json({ error: '缺少 runId' });
+    const cfg = githubConfig();
+    const run = await ghJson('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}`);
+    if (run.status !== 'completed' || run.conclusion !== 'success')
+      return res.status(400).json({ error: `云端运行状态为 ${run.status}/${run.conclusion}，暂不能恢复` });
+    let job = buildJobs.get(String(b.jobId || ''));
+    if (!job) {
+      job = { id: String(b.jobId || ('rec-' + runId)), createdAt: Date.now(), updatedAt: Date.now(), opts: { brand: String(b.brand || '逍遥远控') } };
+      buildJobs.set(job.id, job);
+    }
+    if (b.cdk) job.cdkCode = String(b.cdk).trim().toUpperCase();
+    if (job.status === 'success') return res.json({ ok: true, id: job.id, job: publicJob(job), hint: '已是成功状态' });
+    const brand = cleanBrand((job.opts && job.opts.brand) || '逍遥远控') || 'RustDesk';
+    const workDir = path.join(BUILD_DIR, job.id);
+    fs.mkdirSync(workDir, { recursive: true });
+    const arts = (await ghJsonSteady('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/artifacts`)).artifacts || [];
+    const artNames = { windows: 'rd-client-windows-x64', android: 'rd-client-android-universal', ios: 'rd-client-ios-arm64' };
+    const targets = ['windows', 'android', 'ios'].filter((t) => arts.some((a) => a.name === artNames[t] && !a.expired));
+    if (!targets.length) return res.status(400).json({ error: '该运行没有可用产物（可能已过期）' });
+    setJob(job, 50, '正在恢复云端产物');
+    const dirs = await fetchArtifacts(cfg, runId, targets, workDir, brand);
+    setJob(job, 90, '正在整理安装包');
+    const finals = [];
+    for (const dir of dirs) {
+      const msi = pickInstaller(dir, '.msi');
+      const exe = pickInstaller(dir, '.exe');
+      const apk = pickInstaller(dir, '.apk');
+      const ipa = pickInstaller(dir, '.ipa');
+      if (msi) { const name = `${brand}-${CLIENT_VERSION}-x64-安装包.msi`; fs.copyFileSync(msi, path.join(workDir, name)); finals.push(name); }
+      else if (exe) { const name = `${brand}-${CLIENT_VERSION}-x64.exe`; fs.copyFileSync(exe, path.join(workDir, name)); finals.push(name); }
+      if (apk) { const name = `${brand}-${CLIENT_VERSION}-Android.apk`; fs.copyFileSync(apk, path.join(workDir, name)); finals.push(name); }
+      if (ipa) { const name = `${brand}-${CLIENT_VERSION}-iOS.ipa`; fs.copyFileSync(ipa, path.join(workDir, name)); finals.push(name); }
+    }
+    if (!finals.length) throw new Error('产物中没有可用的安装包');
+    let fileName, filePath;
+    if (finals.length === 1) { fileName = finals[0]; filePath = path.join(workDir, fileName); }
+    else {
+      fileName = `${brand}-${CLIENT_VERSION}-${finals.length >= 3 ? '三系统' : '多系统'}客户端.zip`;
+      filePath = path.join(workDir, fileName);
+      await runCmd('zip', ['-r', '-q', '-y', fileName, ...finals], { cwd: workDir, timeout: 600000 });
+    }
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) throw new Error('恢复的安装包无效');
+    job.fileName = fileName; job.file = filePath;
+    job.size = fs.statSync(filePath).size;
+    job.status = 'success'; job.successAt = Date.now();
+    setJob(job, 100, '恢复完成，可下载客户端');
+    recordBuildHistory(job);
+    console.log(`[BUILD ${job.id}] recovered from run ${runId}: ${fileName} (${(job.size / 1048576).toFixed(1)} MB)`);
+    res.json({ ok: true, id: job.id, job: publicJob(job) });
+  } catch (e) {
+    console.warn('[BUILD] recover failed:', e.message);
+    res.status(500).json({ error: e.message || String(e) });
+  }
 });
 
 // 任务保留 6 小时；已下载的任务 30 分钟后清理
