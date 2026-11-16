@@ -2109,7 +2109,12 @@ function genCdkCode() {
   return 'RD-' + s;
 }
 
-// ---- 智能机器人指令：生成CDK（仅限管理员 userid）----
+// ---- 智能机器人指令：生成CDK / 列出CDK / 帮助（仅限管理员 userid）----
+function aibotReply(b, content) {
+  const cid = b.chatid || (b.from && b.from.userid) || '';
+  const ctype = b.chattype === 'single' ? 1 : 2;
+  aibotSend({ cmd: 'aibot_send_msg', body: { chatid: cid, chat_type: ctype, msgtype: 'markdown', markdown: { content: content } } });
+}
 function aibotHandleText(b) {
   try {
     if (!b || b.msgtype !== 'text') return;
@@ -2119,29 +2124,56 @@ function aibotHandleText(b) {
     const uid = b.from && b.from.userid;
     if (!uid || admins.indexOf(uid) < 0) return;
     let text = String((b.text && b.text.content) || '').trim();
-    text = text.replace(/@[\u4e00-\u9fa5A-Za-z0-9_-]+\s*/g, ' ').trim();
-    const m = text.match(/^生成\s*cdk\s*(\d{1,2})?$/i);
-    if (!m) return;
-    const count = Math.max(1, Math.min(20, parseInt(m[1], 10) || 1));
-    const now = Date.now(), codes = [];
-    for (let i = 0; i < count; i++) {
-      const code = genCdkCode();
-      cdkRun(`INSERT OR REPLACE INTO cdk(code,note,status,max_uses,used_count,expires_at,created_at) VALUES(${cdkQ(code)},${cdkQ('机器人创建')},'unused',1,0,0,${now + i})`);
-      codes.push(code);
+    text = text.replace(/@[\u4e00-\u9fa5A-Za-z0-9_-]+\s*/g, ' ').trim().toLowerCase();
+
+    // 生成 CDK
+    let m = text.match(/^生成\s*cdk\s*(\d{1,2})?$/i);
+    if (m) {
+      const count = Math.max(1, Math.min(20, parseInt(m[1], 10) || 1));
+      const now = Date.now(), codes = [];
+      for (let i = 0; i < count; i++) {
+        const code = genCdkCode();
+        cdkRun(`INSERT OR REPLACE INTO cdk(code,note,status,max_uses,used_count,expires_at,created_at) VALUES(${cdkQ(code)},${cdkQ('机器人创建')},'unused',1,0,0,${now + i})`);
+        codes.push(code);
+      }
+      console.log('[notify] aibot 生成 ' + codes.length + ' 个CDK by ' + uid);
+      aibotReply(b, '**已生成 ' + codes.length + ' 个新 CDK**\n' +
+        codes.map((c) => '`' + c + '`').join('\n') +
+        '\n\n兑换入口：http://182.44.6.48:21120/guest.html\n提示：发送「列出CDK」查看可用列表，发送「生成CDK 5」一次生成 5 个');
+      return;
     }
-    console.log('[notify] aibot 生成 ' + codes.length + ' 个CDK by ' + uid);
-    const cid = b.chatid || uid;
-    const ctype = b.chattype === 'single' ? 1 : 2;
-    aibotSend({ cmd: 'aibot_send_msg', body: {
-      chatid: cid,
-      chat_type: ctype,
-      msgtype: 'markdown',
-      markdown: {
-        content: '**已生成 ' + codes.length + ' 个新 CDK**\n' +
-          codes.map((c) => '`' + c + '`').join('\n') +
-          '\n\n兑换入口：http://182.44.6.48:21120/guest.html\n提示：发送「生成CDK 5」可一次生成 5 个'
-      },
-    } });
+
+    // 列出 CDK
+    if (/^(列出|查看)?\s*(可用)?\s*cdk(列表|清单)?$/.test(text) || /^cdk\s*列表$/.test(text)) {
+      const rows = cdkRows('SELECT code,note,status,max_uses,used_count,expires_at FROM cdk ORDER BY created_at DESC');
+      const avail = rows.filter((r) => r.status !== 'used' && r.status !== 'disabled' && (!r.expires_at || r.expires_at > Date.now()) && Number(r.used_count) < Number(r.max_uses));
+      const active = rows.filter((r) => r.status === 'active');
+      const used = rows.filter((r) => r.status === 'used').length;
+      const lines = ['**CDK 概况**：可用 ' + avail.length + ' · 使用中 ' + active.length + ' · 已核销 ' + used];
+      if (avail.length) {
+        lines.push('');
+        lines.push('**可用 CDK（前 ' + Math.min(15, avail.length) + ' 个）**');
+        for (const r of avail.slice(0, 15)) {
+          const exp = r.expires_at ? new Date(r.expires_at + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 10) + ' 到期' : '永久有效';
+          lines.push('`' + r.code + '`' + (r.note ? '（' + r.note + '）' : '') + ' ' + exp);
+        }
+        if (avail.length > 15) lines.push('…还有 ' + (avail.length - 15) + ' 个，请到管理面板「CDK 管理」查看');
+        lines.push('');
+        lines.push('兑换入口：http://182.44.6.48:21120/guest.html');
+      } else {
+        lines.push('');
+        lines.push('没有可用 CDK，发送「生成CDK 5」快速生成 5 个');
+      }
+      console.log('[notify] aibot 列出CDK by ' + uid + '（可用 ' + avail.length + '）');
+      aibotReply(b, lines.join('\n'));
+      return;
+    }
+
+    // 帮助
+    if (/^(帮助|指令|菜单|help)$/.test(text)) {
+      aibotReply(b, '**支持的指令**\n- 生成CDK / 生成CDK 5：生成新 CDK（最多一次 20 个）\n- 列出CDK：查看可用 CDK 列表\n- 帮助：显示本说明\n\n兑换入口：http://182.44.6.48:21120/guest.html');
+      return;
+    }
   } catch (e) { console.warn('[notify] aibot 指令处理失败:', e.message); }
 }
 function cdkGuestAuth(req, res, next) {
