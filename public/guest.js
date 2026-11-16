@@ -182,8 +182,10 @@
       return r.blob().then(function (blob) {
         var cd = r.headers.get('Content-Disposition') || '';
         var name = 'client-installer';
-        var m = /filename\*?=(?:UTF-8'')?([^;]+)/i.exec(cd);
-        if (m) { name = decodeURIComponent(m[1].replace(/^"|"$/g, '')); }
+        // 优先 RFC5987 的 filename*=UTF-8''（含正确中文）；fallback 的 filename= 是问号占位，会导致下划线文件名
+        var m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+        if (m) { try { name = decodeURIComponent(m[1].trim()); } catch (e2) { name = m[1].trim(); } }
+        else { m = /filename="?([^";]+)"?/i.exec(cd); if (m && m[1].indexOf('?') < 0) name = m[1]; }
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = name;

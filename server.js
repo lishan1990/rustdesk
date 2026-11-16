@@ -1064,8 +1064,11 @@ function restoreBuilds() {
       });
       // 回填 CDK 绑定（恢复/遗留产物跨重启后游客仍可继续下载）
       try {
-        const crow = cdkRows(`SELECT code FROM cdk WHERE job_id=${cdkQ(dir)} LIMIT 1`)[0];
-        if (crow) buildJobs.get(dir).cdkCode = crow.code;
+        const crow = cdkRows(`SELECT code, brand FROM cdk WHERE job_id=${cdkQ(dir)} LIMIT 1`)[0];
+        if (crow) {
+          buildJobs.get(dir).cdkCode = crow.code;
+          if (crow.brand && buildJobs.get(dir).opts) buildJobs.get(dir).opts.brand = crow.brand;
+        }
       } catch (e2) {}
       console.log('[BUILD] restore leftover artifact:', dir, f);
       // 历史里没有这条记录时补登（旧产物没有保存定制参数，未知项留空）
@@ -1860,7 +1863,14 @@ app.post('/api/build/recover', async (req, res) => {
       try { cdkRun(`UPDATE cdk SET job_id=${cdkQ(job.id)} WHERE code=${cdkQ(job.cdkCode)}`); } catch (e) {}
     }
     if (job.status === 'success') return res.json({ ok: true, id: job.id, job: publicJob(job), hint: '已是成功状态' });
-    const brand = cleanBrand((job.opts && job.opts.brand) || '逍遥远控') || 'RustDesk';
+    let brandSrc = (job.opts && job.opts.brand) || '';
+    if (!brandSrc && job.cdkCode) {
+      try { const crow = cdkRows(`SELECT brand FROM cdk WHERE code=${cdkQ(job.cdkCode)} LIMIT 1`)[0]; if (crow && crow.brand) brandSrc = crow.brand; } catch (e) {}
+    }
+    if (!brandSrc) {
+      try { const crow = cdkRows(`SELECT brand FROM cdk WHERE job_id=${cdkQ(job.id)} LIMIT 1`)[0]; if (crow && crow.brand) brandSrc = crow.brand; } catch (e) {}
+    }
+    const brand = cleanBrand(brandSrc || '逍遥远控') || 'RustDesk';
     const workDir = path.join(BUILD_DIR, job.id);
     fs.mkdirSync(workDir, { recursive: true });
     const arts = (await ghJsonSteady('GET', `/repos/${cfg.owner}/${cfg.repo}/actions/runs/${runId}/artifacts`)).artifacts || [];
@@ -2083,6 +2093,7 @@ function initCdkDb() {
     expires_at INTEGER NOT NULL
   )`);
   cdkRun(`CREATE INDEX IF NOT EXISTS idx_cdk_session_code ON cdk_session(code)`);
+  try { cdkRun(`ALTER TABLE cdk ADD COLUMN brand TEXT DEFAULT ''`); } catch (e) {}
   console.log('[CDK] database ready at', CDK_DB);
 }
 initCdkDb();
@@ -2179,6 +2190,7 @@ app.post('/api/guest/build', cdkGuestAuth, async (req, res) => {
   try { githubConfig(); } catch (e) { return res.status(400).json({ error: e.message }); }
   const running = [...buildJobs.values()].find(j => j.status === 'running' || j.status === 'queued');
   if (running) return res.status(409).json({ error: '已有构建任务正在进行，请等完成后再提交' });
+  try { cdkRun(`UPDATE cdk SET brand=${cdkQ(brand)} WHERE code=${cdkQ(req.cdkGuest.code)}`); } catch (e) {}
   const id = 'g' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
   const job = {
     id, status: 'queued', progress: 0, step: '已加入构建队列',
