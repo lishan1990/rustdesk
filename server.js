@@ -1538,7 +1538,7 @@ async function runCloudBuild(job) {
     const dispatchAt = Date.now();
     await ghJson('POST', `/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${cfg.workflow}/dispatches`, {
       ref: cfg.branch,
-      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', 'icon-url': (job.opts && job.opts.iconUrl) || '', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
+      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': (job.opts && job.opts.screenwall) ? 'screenwall' : 'client', 'icon-url': (job.opts && job.opts.iconUrl) || '', 'screenwall': (job.opts && job.opts.screenwall) ? 'true' : 'false', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
     });
     const runId = await waitForRun(cfg, dispatchAt, job);
     await pollRun(cfg, runId, job);
@@ -1743,6 +1743,7 @@ app.post('/api/build/start', async (req, res) => {
       all: body.all === true || body.all === 'true' || body.all === 'Y',
       both: !!body.both, // 兼容旧版「双系统构建」请求
       lang: body.lang === 'en' ? 'en' : 'zh',
+      screenwall: body.screenwall === true || body.screenwall === 'true' || body.screenwall === 'Y',
       conn: body.conn === 'dual' ? 'dual' : 'agent',
       style: body.style === 'standard' ? 'standard' : (body.style === 'unattended' ? 'unattended' : 'portable'),
       prompt: String(body.prompt || '').slice(0, 100),
