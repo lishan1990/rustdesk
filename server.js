@@ -7,6 +7,7 @@ const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 const PORT = process.env.PORT || 21120;
@@ -177,11 +178,37 @@ function blobOfHex(hex) {
 }
 function newGuid() { return new Uint8Array(crypto.randomBytes(16)); }
 
-// 用官方工具写密码哈希（hbbs 的哈希算法与标准 bcrypt 不同，必须用它）
-function setPasswordByUtils(username, password) {
-  execFileSync('/opt/rustdesk-server/bin/rustdesk-utils', ['set_password', username, password], {
-    cwd: '/opt/rustdesk-server/bin', timeout: 15000, stdio: 'ignore',
-  });
+// 标准 bcrypt 密码哈希（hbbs 控制台库 admin 为 $2b$06$，rustdesk-api 库 admin 为 $2a$10$，均可校验）
+function passwordHash(password) { return bcrypt.hashSync(String(password), 10); }
+// 客户端登录走 rustdesk-api（lejianwen/rustdesk-api）的独立库，注册/改密必须同时写这里
+const API_DB_PATH = process.env.API_DB_PATH || '/opt/rustdesk-api/release/data/rustdeskapi.db';
+function apiSqlQuote(v) { return "'" + String(v == null ? '' : v).replace(/'/g, "''") + "'"; }
+function syncApiUserStatus(username, enabled) {
+  if (!fs.existsSync(API_DB_PATH)) return;
+  const status = enabled ? 1 : 2;
+  try {
+    execFileSync(SQLITE3_BIN, [API_DB_PATH,
+      `UPDATE users SET status=${status}, updated_at=${apiSqlQuote(new Date().toISOString().replace('T', ' ').slice(0, 19))} WHERE username=${apiSqlQuote(username)};`],
+      { timeout: 10000, stdio: 'ignore' });
+  } catch (e) { console.warn('[API-DB] status sync failed:', e.message); }
+}
+function syncApiUser(username, password, opts = {}) {
+  if (!fs.existsSync(API_DB_PATH)) throw new Error('rustdesk-api 用户库不存在：' + API_DB_PATH);
+  const hash = passwordHash(password);
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const id = execFileSync(SQLITE3_BIN, [API_DB_PATH,
+    `SELECT id FROM users WHERE username=${apiSqlQuote(username)} LIMIT 1;`],
+    { encoding: 'utf8', timeout: 10000 }).trim();
+  if (id) {
+    execFileSync(SQLITE3_BIN, [API_DB_PATH,
+      `UPDATE users SET password=${apiSqlQuote(hash)}, status=1, updated_at=${apiSqlQuote(now)} WHERE id=${Number(id)};`],
+      { timeout: 10000, stdio: 'ignore' });
+  } else {
+    execFileSync(SQLITE3_BIN, [API_DB_PATH,
+      `INSERT INTO users (username,email,password,nickname,group_id,is_admin,status,created_at,updated_at)
+       VALUES (${apiSqlQuote(username)},${apiSqlQuote(opts.email || '')},${apiSqlQuote(hash)},${apiSqlQuote(username)},1,0,1,${apiSqlQuote(now)},${apiSqlQuote(now)});`],
+      { timeout: 10000, stdio: 'ignore' });
+  }
 }
 
 // ---------- 写数据库（串行化：停 hbbs → 修改 → 启动） ----------
@@ -487,16 +514,16 @@ app.post('/api/users/register', async (req, res) => {
       const teamGuid = team.length ? team[0].values[0][0] : null;
       const grpGuid = grp.length ? grp[0].values[0][0] : null;
       if (!teamGuid || !grpGuid) throw new Error('缺少默认 team/grp，无法创建用户');
+      const hash = passwordHash(password);
       db.run(
         `INSERT INTO "user" (guid,name,email,phone,password,note,status,grp,created_at,team,role,info,password_set_at)
-         VALUES (?,?,?,NULL,'',NULL,1,?,datetime('now'),?,1,'{}',NULL)`,
-        [newGuid(), name, email, new Uint8Array(grpGuid), new Uint8Array(teamGuid)]
+         VALUES (?,?,?,NULL,?,NULL,1,?,datetime('now'),?,1,'{}',datetime('now'))`,
+        [newGuid(), name, email, hash, new Uint8Array(grpGuid), new Uint8Array(teamGuid)]
       );
       return name;
-    }, {
-      // 密码哈希必须由官方 rustdesk-utils 生成，否则 hbbs 无法通过登录校验
-      afterWrite: () => setPasswordByUtils(name, password),
     });
+    // 客户端登录查的是 rustdesk-api 的独立库，必须同步创建账号
+    syncApiUser(name, password, { email: email || '' });
     res.json({ ok: true, username: result });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -515,9 +542,10 @@ app.post('/api/users/password', async (req, res) => {
       const rows = dbQuery(db, `SELECT name FROM "user" WHERE guid = ?`, [guid]);
       if (!rows.length) throw new Error('用户不存在');
       username = rows[0].name;
-    }, {
-      afterWrite: () => setPasswordByUtils(username, password),
+      db.run(`UPDATE "user" SET password=?, password_set_at=datetime('now') WHERE guid=?`,
+        [passwordHash(password), guid]);
     });
+    syncApiUser(username, password);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -530,6 +558,7 @@ app.post('/api/users/status', async (req, res) => {
   const status = Number(req.body.status) === 1 ? 1 : 0;
   if (!guid) return res.status(400).json({ error: '无效的用户 GUID' });
   try {
+    let uname = '';
     await withDbWrite((db) => {
       // 至少保留一个可用管理员，避免把自己锁死
       if (status === 0) {
@@ -540,8 +569,11 @@ app.post('/api/users/status', async (req, res) => {
         const isAdminActive = row.role === 1 && row.status === 1;
         if (isAdminActive && n <= 1) throw new Error('不能禁用最后一个管理员账户');
       }
+      const rows = dbQuery(db, `SELECT name FROM "user" WHERE guid = ?`, [guid]);
+      if (rows.length) uname = rows[0].name;
       db.run(`UPDATE "user" SET status = ? WHERE guid = ?`, [status, guid]);
     });
+    if (uname) syncApiUserStatus(uname, status === 1);
     res.json({ ok: true, status });
   } catch (e) {
     res.status(500).json({ error: e.message });
