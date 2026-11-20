@@ -22,6 +22,7 @@ const PAGES = {
   'build-history':{ group: '客户端定制', title: '构建历史', render: renderBuildHistory, crumb: ['客户端定制', '构建历史'] },
   'cdk-manage':{ group: 'SaaS定制', title: 'CDK 管理', render: renderCdkManage, crumb: ['SaaS定制', 'CDK 管理'] },
   'notify-cfg':{ group: 'SaaS定制', title: '通知设置', render: renderNotifyCfg, crumb: ['SaaS定制', '通知设置'] },
+  'screen-wall':{ group: 'SaaS定制', title: '屏幕墙', render: renderScreenWall, crumb: ['SaaS定制', '屏幕墙'] },
 };
 
 let currentPage = 'overview';
@@ -2134,4 +2135,113 @@ async function sendNotifyTest() {
     await postJson('/api/cdk/notify-test', {});
     toast('测试通知已提交，请查看企业微信群');
   } catch (e) { toast('发送失败：' + (e.message || e), 'err'); }
+}
+
+
+// ---------- 屏幕墙配置（管理员专用） ----------
+let swDevices = [];
+let swSelected = new Set();
+async function renderScreenWall() {
+  loading();
+  let d = {};
+  try { d = await api('/api/screenwall/devices'); } catch (e) {
+    $('#content').innerHTML = '';
+    $('#content').appendChild(errorBox(e));
+    return;
+  }
+  swDevices = d.devices || [];
+  swSelected = new Set((d.selected || []).map(x => String(x.id)));
+  const layout = d.layout || '3x3';
+  const rows = swDevices.map(dev => {
+    const id = String(dev.id);
+    const checked = swSelected.has(id);
+    const sel = (d.selected || []).find(x => String(x.id) === id) || {};
+    return h('tr', {}, [
+      h('td', {}, [
+        h('label', { class: 'sw-check' }, [
+          h('input', { type: 'checkbox', class: 'sw-sel', dataset: { id: id }, checked: checked }),
+          ' ' + (dev.name && dev.name !== '-' ? dev.name : (dev.hostname && dev.hostname !== '-' ? dev.hostname : '未命名')),
+        ]),
+      ]),
+      h('td', { class: 'mono-sm' }, id),
+      h('td', {}, dev.os && dev.os !== '-' ? String(dev.os).split(' / ')[0] : '-'),
+      h('td', {}, dev.ip || '-'),
+      h('td', {}, dev.lastSeen || '-'),
+      h('td', {}, [
+        h('input', { type: 'password', class: 'form-input sw-pw', dataset: { id: id }, value: sel.password || '', placeholder: '访问密码（选填）', style: 'min-width:150px' }),
+      ]),
+    ]);
+  });
+  $('#content').innerHTML = '';
+  $('#content').appendChild(h('div', {}, [
+    pageHead('屏幕墙', '管理员专用：勾选要监控的设备并填写访问密码，保存后可生成启动配置。屏幕墙客户端仅在你自己构建时启用，游客 CDK 客户端不含此功能。'),
+    h('div', { class: 'card' }, [
+      h('div', { class: 'card-head' }, [
+        h('span', { class: 'card-title' }, '设备选择'),
+        badge(swDevices.length + ' 台已注册', 'muted'),
+      ]),
+      h('div', { class: 'card-body' }, [
+        h('div', { class: 'form-row' }, [
+          field('宫格布局', h('select', { class: 'form-input', id: 'swLayout', style: 'max-width:180px' }, [
+            h('option', { value: '2x2', selected: layout === '2x2' }, '2 × 2（4 屏）'),
+            h('option', { value: '3x3', selected: layout === '3x3' }, '3 × 3（9 屏，推荐）'),
+            h('option', { value: '4x4', selected: layout === '4x4' }, '4 × 4（16 屏）'),
+          ])),
+        ]),
+        h('div', { class: 'text-muted text-sm', style: 'margin:8px 0' },
+          '说明：OSS 服务端不落库实时在线状态，以下为已注册设备（按注册时间倒序）。实际能否连接由客户端发起连接时决定。'),
+        h('table', { class: 'table', style: 'width:100%' }, [
+          h('thead', {}, [
+            h('tr', {}, [
+              h('th', {}, '设备'), h('th', {}, 'ID'), h('th', {}, '系统'),
+              h('th', {}, 'IP'), h('th', {}, '最后上线'), h('th', {}, '访问密码'),
+            ]),
+          ]),
+          h('tbody', {}, rows.length ? rows : [h('tr', {}, [h('td', { colspan: '6' }, empty('暂无注册设备'))])]),
+        ]),
+        h('div', { style: 'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap' }, [
+          h('button', { class: 'btn btn-primary', onclick: saveScreenWall }, '保存配置'),
+          h('button', { class: 'btn btn-secondary', onclick: exportScreenWall }, '导出启动配置 (JSON)'),
+        ]),
+      ]),
+    ]),
+    h('div', { class: 'card', style: 'margin-top:16px' }, [
+      h('div', { class: 'card-head' }, [h('span', { class: 'card-title' }, '使用方法')]),
+      h('div', { class: 'card-body text-sm' }, [
+        h('p', {}, '1. 勾选设备并填写访问密码（未设密码的设备可留空），点击「保存配置」。'),
+        h('p', {}, '2. 点击「导出启动配置」，把生成的 JSON 保存到本机（如 screenwall.json）。'),
+        h('p', {}, '3. 在 Windows 上把启动器与导出的 JSON 放在一起，双击启动器即可批量打开连接窗口并自动排成宫格。'),
+        h('p', { class: 'text-muted' }, '提示：屏幕墙为只读监控视图，点击任意格子可接管该设备；关闭格子即断开对应连接。'),
+      ]),
+    ]),
+  ]));
+}
+function collectScreenWall() {
+  const layout = ($('#swLayout') && $('#swLayout').value) || '3x3';
+  const devices = [];
+  $$('.sw-sel').forEach(cb => {
+    if (!cb.checked) return;
+    const id = cb.dataset.id;
+    const pwEl = $$('.sw-pw').find(x => x.dataset.id === id);
+    const nameEl = cb.parentNode && cb.parentNode.textContent ? cb.parentNode.textContent.trim() : '';
+    devices.push({ id: id, name: nameEl, password: pwEl ? pwEl.value : '' });
+  });
+  return { enabled: devices.length > 0, layout, devices };
+}
+async function saveScreenWall() {
+  const cfg = collectScreenWall();
+  try {
+    const r = await postJson('/api/screenwall/config', cfg);
+    toast('已保存 ' + (r.count || cfg.devices.length) + ' 台设备配置');
+  } catch (e) { toast('保存失败: ' + (e.message || e), 'err'); }
+}
+function exportScreenWall() {
+  const cfg = collectScreenWall();
+  const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'screenwall.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已导出 screenwall.json');
 }
