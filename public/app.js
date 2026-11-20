@@ -2202,6 +2202,7 @@ async function renderScreenWall() {
         h('div', { style: 'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap' }, [
           h('button', { class: 'btn btn-primary', onclick: saveScreenWall }, '保存配置'),
           h('button', { class: 'btn btn-secondary', onclick: exportScreenWall }, '导出启动配置 (JSON)'),
+          h('button', { class: 'btn btn-secondary', onclick: buildScreenWallClient }, '生成监控墙客户端'),
         ]),
       ]),
     ]),
@@ -2209,9 +2210,10 @@ async function renderScreenWall() {
       h('div', { class: 'card-head' }, [h('span', { class: 'card-title' }, '使用方法')]),
       h('div', { class: 'card-body text-sm' }, [
         h('p', {}, '1. 勾选设备并填写访问密码（未设密码的设备可留空），点击「保存配置」。'),
-        h('p', {}, '2. 点击「导出启动配置」，把生成的 JSON 保存到本机（如 screenwall.json）。'),
-        h('p', {}, '3. 在 Windows 上把启动器与导出的 JSON 放在一起，双击启动器即可批量打开连接窗口并自动排成宫格。'),
-        h('p', { class: 'text-muted' }, '提示：屏幕墙为只读监控视图，点击任意格子可接管该设备；关闭格子即断开对应连接。'),
+        h('p', {}, '2. 在「客户端定制」页填好品牌名与服务器地址，回到本页点击「生成监控墙客户端」（约 40-90 分钟）。'),
+        h('p', {}, '3. 下载客户端安装包并安装；把本页「导出启动配置」得到的 screenwall.json 放到客户端安装目录（与 exe 同目录）。'),
+        h('p', {}, '4. 用命令行运行：客户端exe --screenwall，即可自动打开 N 宫格画面；点击任一格子可接管设备。'),
+        h('p', { class: 'text-muted' }, '说明：只有"监控墙客户端"带 screenwall 模式，游客 CDK 定制的客户端不含此功能，避免越权。screenwall.json 含设备访问密码，请妥善保管。'),
       ]),
     ]),
   ]));
@@ -2244,4 +2246,28 @@ function exportScreenWall() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast('已导出 screenwall.json');
+}
+
+async function buildScreenWallClient() {
+  const sw = collectScreenWall();
+  if (!sw.devices.length) { toast('请先勾选设备并保存配置', 'err'); return; }
+  // 先保存配置
+  try { await postJson('/api/screenwall/config', sw); } catch (e) { toast('保存配置失败: ' + (e.message || e), 'err'); return; }
+  // 复用定制页的品牌/服务器等配置，叠加 screenwall 标志
+  let cfg = {};
+  try { cfg = collectCustomize(); } catch (e) {}
+  if (!cfg.brand) { toast('请先在「客户端定制 → 基础」页填写品牌名', 'err'); return; }
+  if (!cfg.host) { toast('请先在「客户端定制 → 服务器」页填写 ID 服务器地址', 'err'); return; }
+  cfg.screenwall = true;
+  cfg.os = 'windows'; cfg.all = false; cfg.both = false;
+  try {
+    const r = await postJson('/api/build/start', cfg);
+    toast('监控墙客户端已加入构建队列，可在「构建历史」查看进度');
+    if (typeof buildView !== 'undefined' && buildView) {
+      buildView.show = true; buildView.running = true; buildView.pct = 2;
+      buildView.step = '正在提交监控墙构建任务...'; buildView.download = false;
+      buildView.id = r.id;
+      if (typeof pollBuild === 'function') pollBuild(r.id);
+    }
+  } catch (e) { toast('构建提交失败: ' + (e.message || e), 'err'); }
 }
