@@ -453,62 +453,6 @@ app.get('/api/devices', async (req, res) => {
   res.json({ total: rows.length, devices: list });
 });
 
-// ---------- 屏幕墙设备清单（管理员专用） ----------
-// OSS 服务端 peer 表不含实时在线状态（hbbs 在线状态在内存，不落库）。
-// 因此这里返回所有已注册设备，按 created_at 倒序（最近注册/上线的在前）。
-// 真正是否在线，由客户端实际发起连接时决定。
-const SW_CONFIG_PATH = path.join(__dirname, 'screenwall.json');
-function readSwConfig() {
-  try {
-    if (fs.existsSync(SW_CONFIG_PATH)) return JSON.parse(fs.readFileSync(SW_CONFIG_PATH, 'utf8'));
-  } catch (e) { console.warn('[SW] 读取配置失败:', e.message); }
-  return { enabled: false, layout: '3x3', devices: [] };
-}
-function writeSwConfig(cfg) {
-  fs.writeFileSync(SW_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
-}
-app.get('/api/screenwall/devices', async (req, res) => {
-  const rows = await runSqlOss(`SELECT id, note, status, created_at, info FROM "peer" ORDER BY created_at DESC LIMIT 200`);
-  let legacy = {};
-  try {
-    for (const r of await runSql(`SELECT id, info FROM "peer"`)) {
-      try { legacy[r.id] = typeof r.info === 'string' ? JSON.parse(r.info) : (r.info || {}); } catch {}
-    }
-  } catch {}
-  const cfg = readSwConfig();
-  const selected = new Set((cfg.devices || []).map(d => String(d.id)));
-  const list = rows.map(r => {
-    let info = {};
-    try { if (typeof r.info === 'string' && r.info.startsWith('{')) info = JSON.parse(r.info); } catch {}
-    const lg = legacy[r.id] || {};
-    const prev = (cfg.devices || []).find(d => String(d.id) === String(r.id)) || {};
-    return {
-      id: r.id || '-',
-      name: r.note || lg.device_name || prev.name || '-',
-      hostname: lg.device_name || '-',
-      os: lg.os || '-',
-      username: lg.username || '-',
-      ip: (info.ip || '').replace(/^::ffff:/, '') || lg.ip || '-',
-      lastSeen: utc2local(r.created_at),
-      status: r.status == null ? 1 : r.status,
-      selected: selected.has(String(r.id)),
-      password: prev.password || '',
-    };
-  });
-  res.json({ total: list.length, selected: cfg.devices || [], layout: cfg.layout || '3x3', enabled: !!cfg.enabled, devices: list });
-});
-app.post('/api/screenwall/config', (req, res) => {
-  const b = req.body || {};
-  const layout = ['2x2', '3x3', '4x4'].includes(b.layout) ? b.layout : '3x3';
-  const devices = Array.isArray(b.devices) ? b.devices.slice(0, 16).map(d => ({
-    id: String(d.id || '').trim().slice(0, 100),
-    name: String(d.name || '').trim().slice(0, 100),
-    password: String(d.password || '').slice(0, 200),
-  })).filter(d => d.id) : [];
-  writeSwConfig({ enabled: !!b.enabled, layout, devices });
-  res.json({ ok: true, enabled: !!b.enabled, layout, count: devices.length });
-});
-
 // 设备备注（写 OSS peer.note；用 sqlite3 CLI 在线写，与 hbbs 的 WAL 共存）
 app.post('/api/devices/rename', (req, res) => {
   const id = String((req.body || {}).id || '').trim().replace(/'/g, '');
@@ -1538,7 +1482,7 @@ async function runCloudBuild(job) {
     const dispatchAt = Date.now();
     await ghJson('POST', `/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${cfg.workflow}/dispatches`, {
       ref: cfg.branch,
-      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': (job.opts && job.opts.screenwall) ? 'screenwall' : 'client', 'icon-url': (job.opts && job.opts.iconUrl) || '', 'screenwall': (job.opts && job.opts.screenwall) ? 'true' : 'false', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
+      inputs: { 'upload-artifact': 'true', 'publish-update-metadata': 'false', 'upload-tag': 'client', 'icon-url': (job.opts && job.opts.iconUrl) || '', target: targets.length > 2 ? 'all' : (targets.length > 1 ? 'both' : targets[0]) },
     });
     const runId = await waitForRun(cfg, dispatchAt, job);
     await pollRun(cfg, runId, job);
@@ -1743,7 +1687,6 @@ app.post('/api/build/start', async (req, res) => {
       all: body.all === true || body.all === 'true' || body.all === 'Y',
       both: !!body.both, // 兼容旧版「双系统构建」请求
       lang: body.lang === 'en' ? 'en' : 'zh',
-      screenwall: body.screenwall === true || body.screenwall === 'true' || body.screenwall === 'Y',
       conn: body.conn === 'dual' ? 'dual' : 'agent',
       style: body.style === 'standard' ? 'standard' : (body.style === 'unattended' ? 'unattended' : 'portable'),
       prompt: String(body.prompt || '').slice(0, 100),
@@ -2030,11 +1973,11 @@ app.post('/api/build/recover', async (req, res) => {
   }
 });
 
-// 任务保留 6 小时；已下载的任务 30 分钟后清理
+// 任务保留 7 天；已下载的任务 30 分钟后清理
 setInterval(() => {
   const now = Date.now();
   for (const [id, job] of buildJobs) {
-    const stale = now - job.createdAt > 6 * 60 * 60 * 1000;
+    const stale = now - job.createdAt > 7 * 24 * 60 * 60 * 1000;
     const downloadedIdle = job.downloaded && now - job.updatedAt > 30 * 60 * 1000;
     if (stale || downloadedIdle) {
       if (job.file) { try { fs.unlinkSync(job.file); } catch (e) {} }
